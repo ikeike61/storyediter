@@ -1441,6 +1441,14 @@ function renderWelcome(){
     const b=$("#i-apply"); if(b){ const orig=b.onclick; b.onclick=async()=>{ await orig(); render(); }; } };
 }
 
+/* 画像を押すと全体を大きく表示する */
+document.addEventListener("click",ev=>{
+  const img=ev.target.closest&&ev.target.closest(".portrait img, .gimg img"); if(!img) return;
+  const lb=document.createElement("div"); lb.className="lightbox"; lb.setAttribute("role","dialog"); lb.setAttribute("aria-label","画像の拡大表示");
+  lb.innerHTML=`<img src="${esc(img.src)}" alt="${esc(img.alt)}">`;
+  const close=()=>{lb.remove(); document.removeEventListener("keydown",onKey);}; const onKey=e=>{if(e.key==="Escape") close();};
+  lb.onclick=close; document.addEventListener("keydown",onKey); document.body.appendChild(lb);
+});
 /* ---------- 起動 ---------- */
 $("#b-sync").onclick=()=>sync();
 $("#b-discard").onclick=()=>openDiscard();
@@ -1454,7 +1462,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v10";
+const APP_VERSION="kozo-v11";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
