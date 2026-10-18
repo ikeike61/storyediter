@@ -186,3 +186,19 @@ body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset
 #overlay{position:fixed;inset:0;z-index:50;background:color-mix(in srgb,var(--ink) 35%,transparent);display:grid;place-items:center;padding:16px}
 .dialog{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;max-width:560px;width:100%;max-height:85vh;overflow:auto}
 .welcome{margin-block:16px}
+
+/* ---- 設定タブ ---- */
+.lore-mode{margin-block:6px 4px}
+.srow{display:flex;gap:8px;align-items:center;justify-content:space-between;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;border-left:3px solid transparent}
+.srow:hover{background:var(--bg)}
+.srow[aria-current="true"]{background:var(--accent-soft);border-left-color:var(--accent)}
+.srow .ct{min-width:0}
+.gimg.wide img{aspect-ratio:4/3;object-position:center}
+.orbcard{margin-block:8px 40px}
+.orbtable{min-width:760px}
+.orbtable td{padding:4px 6px;vertical-align:top}
+.orbtable td.n{font-family:var(--f-display);font-weight:800;font-size:18px;color:var(--gilt);width:44px;text-align:center;padding-top:8px}
+.orbtable tr.has td.n{color:var(--accent)}
+.orbtable input,.orbtable textarea{width:100%;border:1px solid transparent;border-radius:5px;background:transparent;padding:5px 7px;font-size:13px;color:var(--ink);resize:vertical}
+.orbtable input:hover,.orbtable textarea:hover,.orbtable input:focus,.orbtable textarea:focus{border-color:var(--line);background:var(--bg)}
+.orbtable th:nth-child(2){width:15%}.orbtable th:nth-child(3){width:34%}.orbtable th:nth-child(4){width:10%}

@@ -6,6 +6,8 @@ const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 let eps=[], meta=null, loaded=false, view="edit", selId=null, q="";
 let pendingDelete=null, exportOpen=false;
 let chars=[], charSel=null, cq="";
+let setts=[], orbs=[], loreSel=null, lq="", loreMode="items";
+try{loreSel=localStorage.getItem("kozo.lore"); loreMode=localStorage.getItem("kozo.loreMode")||"items";}catch(e){}
 const CHAR_STATUSES=["決定","決定（細部は検討中）","決定（名前未定）","決定（中身未定）","検討中","未配置"];
 try{charSel=localStorage.getItem("kozo.char");}catch(e){}
 const dirty=new Map(); // id -> timer
@@ -27,22 +29,25 @@ const arcName=id=>(meta&&meta.arcs||[]).find(a=>a.id===id)?.name||"（編なし�
 const isReal=o=>/本物|吸収|誕生/.test(o||"");
 
 /* ---------- 端末内のデータ ---------- */
-const recs=new Map(); // "meta" / "e:<id>" / "c:<id>" → {data, updatedAt, base, dirty, deleted}
+const recs=new Map(); // "meta" / "e:<id>" / "c:<id>" / "s:<id>"（設定） / "o:<文字>"（宿命刻） → {data, updatedAt, base, dirty, deleted}
 const urlCache=new Map(); // 画像ID → 表示用URL
 const PLACEHOLDER="data:image/svg+xml;utf8,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3 4"><rect width="3" height="4" fill="#8888"/></svg>');
 const stripId=o=>{const {id:_,...b}=o;return b};
-const keyOf=id=>id==="__meta"?"meta":id.startsWith("c:")?id:"e:"+id;
+const keyOf=id=>id==="__meta"?"meta":/^[cso]:/.test(id)?id:"e:"+id;
 function blob(id){return urlCache.get(id)||PLACEHOLDER}
 function defaultMeta(){return {title:"宿命刻の姫君",tagline:"",logline:"",policy:"",arcs:[]}}
 function rebuild(){
-  eps=[]; chars=[]; let m=null;
+  eps=[]; chars=[]; setts=[]; orbs=[]; let m=null;
   for(const [k,r] of recs){
     if(!r||r.deleted||!r.data) continue;
     if(k==="meta") m={...r.data};
     else if(k.startsWith("e:")) eps.push({id:k.slice(2),...structuredClone(r.data)});
     else if(k.startsWith("c:")) chars.push({id:k.slice(2),...structuredClone(r.data)});
+    else if(k.startsWith("s:")) setts.push({id:k.slice(2),...structuredClone(r.data)});
+    else if(k.startsWith("o:")) orbs.push({id:k.slice(2),...structuredClone(r.data)});
   }
   eps.sort((a,b)=>(a.order||0)-(b.order||0)); chars.sort((a,b)=>(a.order||0)-(b.order||0));
+  setts.sort((a,b)=>(a.order||0)-(b.order||0)); orbs.sort((a,b)=>String(a.letter||a.id).localeCompare(String(b.letter||b.id)));
   meta=m||defaultMeta(); meta.arcs=meta.arcs||[];
 }
 function setSave(t,err){const s=$("#save");s.textContent=t;s.classList.toggle("err",!!err)}
@@ -63,15 +68,15 @@ function flushAll(){ for(const k of [...timers.keys()]) persist(k); }
 window.addEventListener("pagehide",flushAll);
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushAll(); });
 function edit(id,mut){
-  const isC=id.startsWith("c:"), cid=id.slice(2);
-  const obj=id==="__meta"?meta:isC?chars.find(c=>c.id===cid):eps.find(e=>e.id===id);
+  const cid=id.slice(2);
+  const obj=id==="__meta"?meta:id.startsWith("c:")?chars.find(c=>c.id===cid):id.startsWith("s:")?setts.find(c=>c.id===cid):id.startsWith("o:")?orbs.find(c=>c.id===cid):eps.find(e=>e.id===id);
   if(!obj) return;
   mut(obj);
   touch(keyOf(id),structuredClone(stripId(obj)),false);
 }
 function newId(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 async function addDoc(kind,body){
-  const id=newId(kind==="c"?"ch":"ep"); const key=(kind==="c"?"c:":"e:")+id;
+  const id=newId({c:"ch",s:"st"}[kind]||"ep"); const key=(kind==="c"||kind==="s"?kind+":":"e:")+id;
   touch(key,body,false); await persist(key); rebuild(); return id;
 }
 async function removeDoc(id){
@@ -123,7 +128,7 @@ async function updateSyncBadge(){
 window.addEventListener("online",updateSyncBadge); window.addEventListener("offline",updateSyncBadge);
 
 const stable=v=>Array.isArray(v)?"["+v.map(stable).join(",")+"]":(v&&typeof v==="object")?"{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+stable(v[k])).join(",")+"}":JSON.stringify(v);
-function labelKey(k,d){return k==="meta"?"作品情報・編":(k.startsWith("c:")?"キャラクター「":"エピソード「")+((d&&(d.title||d.name))||"?")+"」"}
+function labelKey(k,d){if(k==="meta")return "作品情報・編"; if(k.startsWith("o:"))return "宿命刻 "+k.slice(2); return ({c:"キャラクター「",s:"設定「"}[k[0]]||"エピソード「")+((d&&(d.title||d.name))||"?")+"」"}
 
 function chooseConflicts(list){
   return new Promise(res=>{
@@ -197,7 +202,7 @@ async function sync(){
     }
     rebuild();
     // 画像：使われていて端末にない画像を取ってくる
-    const used=new Set(); chars.forEach(c=>(c.images||[]).forEach(im=>used.add(im.id)));
+    const used=new Set(); [...chars,...setts].forEach(c=>(c.images||[]).forEach(im=>used.add(im.id)));
     let dn=0;
     for(const id of used){
       if(limgs.has(id)||!rimgs[id]) continue;
@@ -216,7 +221,9 @@ async function sync(){
 function exportPayload(){
   return {format:"kozo-sync",version:1,exportedAt:Date.now(),source:"tablet",
     meta:stripId(meta), episodes:eps.map(e=>{const r=recs.get("e:"+e.id);return {...e,updatedAt:r&&r.updatedAt||0}}),
-    characters:chars.map(c=>{const r=recs.get("c:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}})};
+    characters:chars.map(c=>{const r=recs.get("c:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}}),
+    settings:setts.map(c=>{const r=recs.get("s:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}}),
+    orbs:orbs.map(c=>{const r=recs.get("o:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}})};
 }
 function downloadFile(name,text,type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type:type||"application/json"}));
@@ -231,6 +238,7 @@ function planImport(text,out){
     if(!cur||cur.deleted) action="add"; else if(iu>(cur.updatedAt||0)) action="update"; else action="skip";
     items.push({key,data,iu,action}); };
   consider("meta",d.meta); (d.episodes||[]).forEach(e=>consider("e:"+e.id,e)); (d.characters||[]).forEach(c=>consider("c:"+c.id,c));
+  (d.settings||[]).forEach(c=>consider("s:"+c.id,c)); (d.orbs||[]).forEach(c=>consider("o:"+c.id,c));
   const todo=items.filter(i=>i.action!=="skip"); const cnt=a=>items.filter(i=>i.action===a).length;
   const imgs=Object.entries(d.images||{}).filter(([id])=>!urlCache.has(id));
   out.innerHTML=`<div class="plan"><p>追加 <b>${cnt("add")}</b>・更新 <b>${cnt("update")}</b>・変更なし（端末の方が新しい） <b>${cnt("skip")}</b>${imgs.length?`・画像 <b>${imgs.length}</b>`:""}</p>
@@ -253,7 +261,8 @@ function planImport(text,out){
 /* ---------- 描画 ---------- */
 function renderHead(){
   if(meta){ $("#h-title").textContent=meta.title||"宿命刻の姫君"; $("#h-tag").textContent=meta.tagline||""; }
-  ["edit","table","chars","policy"].forEach(v=>$("#v-"+v).setAttribute("aria-pressed",String(view===v)));
+  ["edit","table","chars","lore","policy"].forEach(v=>$("#v-"+v).setAttribute("aria-pressed",String(view===v)));
+  if(view==="lore"){ $("#stats").innerHTML=loaded?`<span>設定の項目 <b>${setts.length}</b></span><span>未決 <b>${setts.filter(s=>s.status==="未決").length}</b></span><span>宿命刻 <b>${orbs.filter(o=>o.holder&&o.holder.trim()).length}</b>／${orbs.length||26}</span>`:""; return; }
   if(view==="chars"){ $("#stats").innerHTML=loaded?`<span>キャラクター <b>${chars.length}</b></span><span>画像あり <b>${chars.filter(c=>c.images&&c.images.length).length}</b></span>`:""; return; }
   const r=ranges(); const total=eps.reduce((s,e)=>s+count(e),0);
   const by=s=>eps.filter(e=>e.status===s).length;
@@ -267,7 +276,8 @@ function render(){
   renderHead();
   const m=$("#main");
   if(!loaded){ m.innerHTML=`<div class="notice">構成データを読み込んでいます…</div>`; return; }
-  if(!eps.length&&!chars.length) return renderWelcome();
+  if(!eps.length&&!chars.length&&!setts.length) return renderWelcome();
+  if(view==="lore") return renderLore();
   if(view==="chars") return renderChars();
   if(view==="table") return renderTable();
   if(view==="policy") return renderPolicy();
@@ -596,6 +606,160 @@ async function addChar(afterId){
   charSel=await addDoc("c",body); window._mobileEditing=true; render();
 }
 
+/* ---------- 設定（世界観・用語・組織など） ---------- */
+const LORE_STATUSES=["決定","検討中","★提案","旧設定（参考）","未決"];
+function loreListHTML(){
+  const ql=lq.trim(); let html="", last=null;
+  setts.forEach(s=>{
+    const hay=[s.title,s.summary,s.category,s.body,s.memo,s.keywords].join(" ");
+    if(ql&&!hay.includes(ql)) return;
+    if(s.category!==last){last=s.category; html+=`<div class="arc">${esc(s.category||"（区分なし）")}<span>${setts.filter(x=>x.category===s.category).length}件</span></div>`;}
+    html+=`<button class="srow" data-sid="${s.id}" aria-current="${s.id===loreSel}">
+      <span class="ct"><b>${esc(s.title||"（無題）")}</b><span>${esc(s.summary)}</span></span>
+      ${s.status&&s.status!=="決定"?`<span class="chip ${s.status==="未決"?"s-未着手":"s-たたき台"}">${esc(s.status)}</span>`:""}</button>`;
+  });
+  return html||`<div class="empty" style="padding:12px">${ql?`「${esc(ql)}」に一致する項目はありません。`:"まだ項目がありません。"}</div>`;
+}
+function wireLoreList(){document.querySelectorAll(".srow").forEach(b=>b.onclick=()=>{loreSel=b.dataset.sid; loreMode="items"; window._mobileEditing=true; try{localStorage.setItem("kozo.lore",loreSel)}catch(e){} render(); window.scrollTo({top:0})});}
+function keywordsOf(s){return String(s.keywords||"").split(/[,、，]/).map(x=>x.trim()).filter(x=>x.length>=2)}
+function loreAppearances(s){
+  const kw=keywordsOf(s); if(!kw.length) return [];
+  const r=ranges();
+  return eps.filter(e=>{const t=[e.title,e.summary,e.presents,e.memo,(e.parts||[]).map(p=>p.title+" "+p.beats).join(" ")].join(" ");return kw.some(a=>t.includes(a))}).map(e=>({e,x:r[e.id]}));
+}
+
+function renderLore(){
+  const m=$("#main");
+  const modeBar=`<div class="seg lore-mode" role="group" aria-label="設定の表示"><button id="lm-items" aria-pressed="${loreMode==="items"}">項目</button><button id="lm-orbs" aria-pressed="${loreMode==="orbs"}">宿命刻（A〜Z）</button></div>`;
+  if(loreMode==="orbs") return renderOrbs(modeBar);
+  if(!setts.length){
+    m.innerHTML=`${modeBar}<div class="notice">まだ設定の項目がありません。<button class="btn primary" id="l-first">最初の項目を追加</button><br><span class="hint">設定資料から作った初期データは、「方針・編」タブの「取り込む」から読み込めます。</span></div>`;
+    $("#l-first").onclick=()=>addLore(null); wireLoreMode(); return;
+  }
+  if(!setts.find(s=>s.id===loreSel)) loreSel=setts[0].id;
+  const s=setts.find(x=>x.id===loreSel), idx=setts.indexOf(s), id="s:"+s.id;
+  const imgs=s.images||[]; const cats=[...new Set(setts.map(x=>x.category).filter(Boolean))];
+  const ap=loreAppearances(s);
+  m.innerHTML=`${modeBar}<div class="work ${window._mobileEditing?"editing":""}">
+  <nav class="spine" aria-label="設定の一覧">
+    <div class="search"><input type="search" id="lq" placeholder="項目名・本文で絞り込む" value="${esc(lq)}"></div>
+    <div id="lorelist">${loreListHTML()}</div>
+    <div style="padding:10px"><button class="btn sm" id="l-add" style="width:100%">＋ 項目を追加</button></div>
+  </nav>
+  <section class="desk">
+    <div class="card">
+      <div class="edhead">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="btn sm back" id="l-back">← 一覧</button>
+          <span class="hint">${esc(s.category||"（区分なし）")}</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn sm" id="l-up" ${idx===0?"disabled":""}>↑ 前へ</button>
+          <button class="btn sm" id="l-down" ${idx===setts.length-1?"disabled":""}>↓ 後へ</button>
+          <button class="btn sm" id="l-addafter">＋ この後に追加</button>
+          <button class="btn sm danger" id="l-del">削除</button>
+        </div>
+      </div>
+      <div id="lconfirm"></div>
+      <input class="titlein" data-lk="title" value="${esc(s.title)}" aria-label="項目名">
+      <input class="rolein" data-lk="summary" value="${esc(s.summary)}" placeholder="一行の要約" aria-label="要約">
+      <div class="grid">
+        <label class="f">区分<input data-lk="category" list="catlist" value="${esc(s.category)}"><datalist id="catlist">${cats.map(c=>`<option value="${esc(c)}">`).join("")}</datalist></label>
+        <label class="f">状態<input data-lk="status" list="lstatus" value="${esc(s.status)}"><datalist id="lstatus">${LORE_STATUSES.map(x=>`<option value="${x}">`).join("")}</datalist></label>
+      </div>
+      <label class="f block">関連語（読点区切り。本文に出てくるエピソードを探します）<input data-lk="keywords" value="${esc(s.keywords)}"></label>
+      <div class="block"><span class="hint">関連語が出てくるエピソード（${ap.length}）</span>
+        <div class="apps">${ap.length?ap.map(a=>`<button class="chip appchip" data-goep="${a.e.id}">EP${a.x.ep} ${esc(a.e.title)}</button>`).join(""):`<span class="hint">${keywordsOf(s).length?"見つかりません":"関連語を入れると表示されます"}</span>`}</div></div>
+    </div>
+    <div class="card">
+      <h2 class="sec">内容</h2>
+      <label class="f block" style="margin-top:6px"><textarea data-lk="body" rows="${rowsFor(s.body,8)}" aria-label="内容">${esc(s.body)}</textarea></label>
+      <label class="f block">未決・★案<textarea data-lk="memo" rows="${rowsFor(s.memo,2)}">${esc(s.memo)}</textarea></label>
+      <label class="f block">元の資料<input data-lk="source" value="${esc(s.source)}"></label>
+    </div>
+    <div class="card">
+      <h2 class="sec">画像 <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="hint" id="lup-state"></span><label class="btn sm primary">＋ 画像を追加<input type="file" id="lup" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden></label></span></h2>
+      <div class="hint">地図、紋章、衣装、資料の写真など。</div>
+      <div class="gallery">${imgs.length?imgs.map((im,i)=>`
+        <figure class="gimg wide">
+          <img src="${blob(im.id)}" alt="${esc(im.caption||s.title)}" loading="lazy">
+          <input data-lcap="${i}" value="${esc(im.caption)}" placeholder="説明" aria-label="画像の説明">
+          <div class="gbtns">${i?`<button class="btn sm" data-lmain="${i}">先頭にする</button>`:""}<button class="btn sm danger" data-lidel="${i}">外す</button></div>
+        </figure>`).join(""):`<div class="empty">画像はありません。</div>`}</div>
+    </div>
+  </section></div>`;
+  wireLore(s,id); wireLoreMode();
+}
+function wireLoreMode(){
+  $("#lm-items").onclick=()=>{loreMode="items"; saveLoreMode(); render();};
+  $("#lm-orbs").onclick=()=>{loreMode="orbs"; saveLoreMode(); render();};
+}
+function saveLoreMode(){try{localStorage.setItem("kozo.loreMode",loreMode)}catch(e){}}
+function wireLore(s,id){
+  $("#lq").oninput=ev=>{lq=ev.target.value; $("#lorelist").innerHTML=loreListHTML(); wireLoreList();};
+  wireLoreList();
+  document.querySelectorAll("[data-lk]").forEach(el=>el.oninput=ev=>{const k=el.dataset.lk; edit(id,o=>o[k]=ev.target.value);
+    if(k==="title"||k==="summary"||k==="category"||k==="status"){ $("#lorelist").innerHTML=loreListHTML(); wireLoreList(); }});
+  document.querySelectorAll("[data-lcap]").forEach(el=>el.oninput=ev=>edit(id,o=>o.images[+el.dataset.lcap].caption=ev.target.value));
+  document.querySelectorAll("[data-lmain]").forEach(el=>el.onclick=()=>{const i=+el.dataset.lmain; edit(id,o=>{const [im]=o.images.splice(i,1); o.images.unshift(im)}); render();});
+  document.querySelectorAll("[data-lidel]").forEach(el=>el.onclick=()=>{
+    const i=+el.dataset.lidel;
+    if(pendingDelete!=="limg"+i){pendingDelete="limg"+i; el.textContent="もう一度押すと外す"; return;}
+    pendingDelete=null; const im=s.images[i]; edit(id,o=>o.images.splice(i,1)); render(); if(im) removeImage(im.id);
+  });
+  document.querySelectorAll("[data-goep]").forEach(el=>el.onclick=()=>{selId=el.dataset.goep; view="edit"; window._mobileEditing=true; saveView(); render(); window.scrollTo({top:0})});
+  $("#l-back").onclick=()=>{window._mobileEditing=false; render();};
+  $("#l-add").onclick=()=>addLore(s.id); $("#l-addafter").onclick=()=>addLore(s.id);
+  $("#l-up").onclick=()=>moveLore(s.id,-1); $("#l-down").onclick=()=>moveLore(s.id,1);
+  $("#l-del").onclick=()=>{
+    $("#lconfirm").innerHTML=`<div class="confirm" style="margin-top:10px">「${esc(s.title)}」を削除します。<button class="btn sm danger" id="l-delyes">削除する</button><button class="btn sm" id="l-delno">やめる</button></div>`;
+    $("#l-delno").onclick=()=>$("#lconfirm").innerHTML="";
+    $("#l-delyes").onclick=async()=>{const i=setts.findIndex(x=>x.id===s.id); await removeDoc("s:"+s.id); loreSel=(setts[i+1]||setts[i-1]||{}).id; render();};
+  };
+  $("#lup").onchange=async ev=>{
+    const files=[...ev.target.files]; ev.target.value="";
+    for(const f of files){ $("#lup-state").textContent=`保存中… ${f.name}`;
+      try{ const r=await addImage(f); edit(id,o=>{o.images=o.images||[]; o.images.push({id:r.id,caption:""})}); }catch(e){ $("#lup-state").textContent=`保存できませんでした（${f.name}）`; return; } }
+    $("#lup-state").textContent=""; render();
+  };
+}
+function moveLore(sid,dir){
+  const i=setts.findIndex(s=>s.id===sid), j=i+dir; if(j<0||j>=setts.length) return;
+  const a=setts[i], b=setts[j], oa=a.order, ob=b.order;
+  edit("s:"+a.id,o=>{o.order=ob; if(b.category!==a.category) o.category=b.category;}); edit("s:"+b.id,o=>{o.order=oa;});
+  setts.sort((x,y)=>x.order-y.order); render();
+}
+async function addLore(afterId){
+  const i=afterId?setts.findIndex(s=>s.id===afterId):-1; const prev=setts[i], next=setts[i+1];
+  const order=prev?(next?(prev.order+next.order)/2:prev.order+10):10;
+  const body={title:"新しい項目",summary:"",category:prev?prev.category:"世界観",status:"検討中",keywords:"",body:"",memo:"",source:"",images:[],order};
+  loreSel=await addDoc("s",body); loreMode="items"; window._mobileEditing=true; render();
+}
+
+/* 宿命刻（A〜Z）の一覧表 */
+function renderOrbs(modeBar){
+  const m=$("#main");
+  if(!orbs.length){
+    m.innerHTML=`${modeBar}<div class="notice">宿命刻の一覧がまだありません。<button class="btn primary" id="o-make">A〜Z の表を作る</button><br><span class="hint">設定資料から作った初期データを取り込むと、名称や保持者が入った状態で表示されます。</span></div>`;
+    $("#o-make").onclick=async()=>{ for(let k=0;k<26;k++){ const L=String.fromCharCode(65+k); touch("o:"+L,{letter:L,name:"",holder:"",status:"未割当",note:"",order:k},false); await persist("o:"+L);} rebuild(); render(); };
+    wireLoreMode(); return;
+  }
+  const filled=orbs.filter(o=>o.holder&&o.holder.trim()).length;
+  m.innerHTML=`${modeBar}<div class="card orbcard">
+    <div class="hint">26刻（A〜Z）。保持者や登場回が決まっている刻 <b class="mono">${filled}</b>／26。セルをそのまま書き換えられます。</div>
+    <div class="tablewrap" style="margin-block:10px 0"><table class="orbtable"><thead><tr><th>刻</th><th>名称</th><th>保持者・登場</th><th>状態</th><th>備考</th></tr></thead><tbody>
+    ${orbs.map(o=>`<tr class="${o.holder&&o.holder.trim()?"has":""}"><td class="n">${esc(o.letter)}</td>
+      <td><textarea data-ok="name" data-ol="${o.id}" rows="${rowsFor(o.name,1)}" aria-label="${esc(o.letter)}の名称">${esc(o.name)}</textarea></td>
+      <td><textarea data-ok="holder" data-ol="${o.id}" rows="${rowsFor(o.holder,1)}" aria-label="${esc(o.letter)}の保持者">${esc(o.holder)}</textarea></td>
+      <td><input data-ok="status" data-ol="${o.id}" list="ostat" value="${esc(o.status)}" aria-label="${esc(o.letter)}の状態"></td>
+      <td><textarea data-ok="note" data-ol="${o.id}" rows="${rowsFor(o.note,1)}" aria-label="${esc(o.letter)}の備考">${esc(o.note)}</textarea></td></tr>`).join("")}
+    </tbody></table></div>
+    <datalist id="ostat"><option value="決定"><option value="暫定"><option value="★提案"><option value="未割当"></datalist>
+  </div>`;
+  document.querySelectorAll("[data-ok]").forEach(el=>el.oninput=ev=>{const k=el.dataset.ok; edit("o:"+el.dataset.ol,o=>o[k]=ev.target.value); if(k==="holder") el.closest("tr").classList.toggle("has",!!ev.target.value.trim());});
+  wireLoreMode();
+}
+
 /* ---------- 書き出し ---------- */
 function toMarkdown(){
   const r=ranges(); const L=[];
@@ -628,6 +792,23 @@ function toMarkdown(){
         if(!c[k]) return; L.push(`**${h}**`,""); c[k].split("\n").filter(Boolean).forEach(l=>L.push("- "+l)); L.push("");});
     });
   }
+  if(setts.length){
+    L.push("---","","## 設定","");
+    let g=null;
+    setts.forEach(st=>{
+      if(st.category!==g){g=st.category; L.push(`### ${g||"（区分なし）"}`,"");}
+      L.push(`#### ${st.title}${st.status&&st.status!=="決定"?`（${st.status}）`:""}`,"");
+      if(st.summary) L.push(st.summary,"");
+      if(st.body){ st.body.split("\n").filter(Boolean).forEach(l=>L.push("- "+l)); L.push(""); }
+      if(st.memo) L.push("**未決・★案**："+st.memo.replace(/\n/g,"／"),"");
+    });
+  }
+  if(orbs.length){
+    const cell=v=>String(v||"").replace(/\|/g,"／").replace(/\n/g," ");
+    L.push("---","","## 宿命刻（A〜Z）","","| 刻 | 名称 | 保持者・登場 | 状態 | 備考 |","|---|---|---|---|---|");
+    orbs.forEach(o=>L.push(`| ${o.letter} | ${cell(o.name)} | ${cell(o.holder)} | ${cell(o.status)} | ${cell(o.note)} |`));
+    L.push("");
+  }
   return L.join("\n");
 }
 $("#b-export").onclick=async()=>{
@@ -644,7 +825,7 @@ $("#b-export").onclick=async()=>{
 };
 
 function saveView(){try{localStorage.setItem("kozo.view",view)}catch(e){}}
-["edit","table","chars","policy"].forEach(v=>$("#v-"+v).onclick=()=>{view=v; saveView(); if(v==="edit"||v==="chars") window._mobileEditing=false; render();});
+["edit","table","chars","lore","policy"].forEach(v=>$("#v-"+v).onclick=()=>{view=v; saveView(); if(v!=="table"&&v!=="policy") window._mobileEditing=false; render();});
 
 
 /* ---------- 同期とデータ（方針・編タブ） ---------- */
