@@ -53,7 +53,9 @@ function rebuild(){
 function setSave(t,err){const s=$("#save");s.textContent=t;s.classList.toggle("err",!!err)}
 const timers=new Map();
 function touch(key,data,deleted){
-  const r=recs.get(key)||{base:0};
+  let r=recs.get(key);
+  if(!r) r={base:0,snap:null};                 // 新しく作った項目（破棄すると消える）
+  else if(!r.dirty) r.snap={data:r.data,updatedAt:r.updatedAt,deleted:!!r.deleted}; // 同期済みの状態を控える
   r.data=data; r.updatedAt=Date.now(); r.dirty=true; r.deleted=!!deleted; recs.set(key,r);
   if(timers.has(key)) clearTimeout(timers.get(key));
   setSave("編集中…");
@@ -123,6 +125,7 @@ async function updateSyncBadge(){
   const n=await unsyncedCount();
   b.querySelector(".badge").textContent=n?String(n):"";
   b.querySelector(".badge").hidden=!n;
+  const d=$("#b-discard"); if(d) d.hidden=!n;
   $("#net").textContent=navigator.onLine?"":"オフライン";
 }
 window.addEventListener("online",updateSyncBadge); window.addEventListener("offline",updateSyncBadge);
@@ -145,6 +148,118 @@ function chooseConflicts(list){
 }
 function busy(text){const ov=$("#overlay"); if(text==null){ov.hidden=true; ov.innerHTML=""; return;} ov.hidden=false; ov.innerHTML=`<div class="dialog"><p>${esc(text)}</p></div>`;}
 
+async function loadRemote(){
+  const folder=await Drive.ensureFolder(await kvGet("folderId")); await kvSet("folderId",folder);
+  const fileId=await Drive.findData(folder,await kvGet("dataFileId"));
+  const remote=fileId?await Drive.readJson(fileId):{format:"kozo-drive",version:1,docs:{},images:{}};
+  if(remote.format!=="kozo-drive") throw new Error("ドライブのデータの形式が違います");
+  remote.docs=remote.docs||{}; remote.images=remote.images||{};
+  return {folder,fileId,remote};
+}
+function usedImageIds(){const used=new Set(); for(const r of recs.values()) if(r&&!r.deleted&&r.data) (r.data.images||[]).forEach(im=>used.add(im.id)); return used;}
+// 使われていて端末にない画像を、ドライブから取ってくる
+async function fetchMissingImages(rimgs){
+  const local=new Set((await Store.entries("images")).map(([k])=>k)); let dn=0;
+  for(const id of usedImageIds()){
+    if(local.has(id)||!rimgs[id]) continue;
+    busy(`画像を受け取っています…（${++dn}）`);
+    try{ const b=await Drive.downloadBlob(rimgs[id].driveId); await Store.put("images",id,{blob:b,driveId:rimgs[id].driveId,name:id}); urlCache.set(id,URL.createObjectURL(b)); }catch(e){}
+  }
+}
+// どこからも使われなくなった、まだドライブに送っていない画像を片付ける
+async function dropOrphanImages(){
+  const used=usedImageIds();
+  for(const [id,v] of await Store.entries("images")) if(v&&!v.driveId&&!used.has(id)) await removeImage(id);
+}
+function cancelTimers(keys){ for(const k of keys){ if(timers.has(k)){ clearTimeout(timers.get(k)); timers.delete(k); } } }
+
+/* ---------- 変更の破棄 ---------- */
+async function openDiscard(){
+  if(syncing) return;
+  flushAll();
+  const list=[...recs].filter(([,r])=>r&&r.dirty);
+  const newImgs=(await Store.entries("images")).filter(([,v])=>v&&!v.driveId).length;
+  if(!list.length&&!newImgs){ setSave("取り消す変更はありません"); return; }
+  const kind=r=>(r.snap===null||(!("snap" in r)&&!r.base))?"新規":r.deleted?"削除":"変更";
+  const ov=$("#overlay");
+  ov.innerHTML=`<div class="dialog">
+    <h2 class="sec">変更を破棄</h2>
+    <div class="warn">前回の同期のあとにこの端末で加えた変更を取り消します。<b>取り消した変更は元に戻せません。</b></div>
+    ${list.length?`<div class="hint" style="margin-top:10px">まだドライブに送っていない変更（${list.length}件）</div>
+    <ul class="planlist discard">${list.map(([k,r],i)=>`<li><label><input type="checkbox" data-dk="${i}" checked> ${esc(labelKey(k,r.data))} <span class="chip">${kind(r)}</span></label></li>`).join("")}</ul>`:""}
+    ${newImgs?`<p class="hint">まだ送っていない画像 ${newImgs}枚は、取り消した項目で使われていなければ一緒に消えます。</p>`:""}
+    <div class="dbtns">
+      ${list.length?`<button class="btn danger" id="d-revert">選んだ変更を破棄する</button>`:""}
+      <button class="btn" id="d-drive">すべて破棄して、ドライブの内容に置き換える</button>
+      <button class="btn" id="d-cancel">やめる</button>
+    </div>
+    <p class="hint">「選んだ変更を破棄する」は、前回同期した状態に戻します（オフラインでも使えます）。<br>「ドライブの内容に置き換える」は、ドライブの最新を読み込み直します（ほかの端末の変更も入ります。オンラインのときだけ使えます）。</p>
+  </div>`;
+  ov.hidden=false;
+  $("#d-cancel").onclick=()=>busy(null);
+  if(list.length) $("#d-revert").onclick=async()=>{
+    const keys=[...document.querySelectorAll("[data-dk]")].filter(x=>x.checked).map(x=>list[+x.dataset.dk][0]);
+    if(!keys.length){ busy(null); return; }
+    try{ await revertKeys(keys); }catch(e){ busy(null); setSave(e&&e.message?e.message:"破棄できませんでした",true); }
+  };
+  $("#d-drive").onclick=async()=>{ try{ await replaceWithDrive(); }catch(e){ busy(null); setSave(e&&e.message?e.message:"ドライブから読み込めませんでした",true); } };
+}
+async function revertKeys(keys){
+  cancelTimers(keys);
+  // 以前の版で編集した項目は控えがないので、ドライブから元の状態を読む
+  const needRemote=keys.filter(k=>{const r=recs.get(k); return r&&!("snap" in r)&&r.base;});
+  let rdocs={};
+  if(needRemote.length){
+    if(!navigator.onLine) throw new Error(`${needRemote.length}件は前回同期の状態が端末にないため、オンラインのときに破棄してください`);
+    syncing=true;
+    try{ await Drive.signIn(); busy("ドライブから前回の状態を読んでいます…"); rdocs=(await loadRemote()).remote.docs; }
+    finally{ syncing=false; }
+  }
+  const puts=[], dels=[];
+  for(const k of keys){
+    const r=recs.get(k); if(!r) continue;
+    let s;
+    if("snap" in r) s=r.snap;
+    else if(r.base){ const R=rdocs[k]; s=R?{data:R.data,updatedAt:R.updatedAt,deleted:!!R.deleted}:null; }
+    else s=null;
+    if(!s){ dels.push(k); recs.delete(k); continue; }
+    const v={data:s.data,updatedAt:s.updatedAt,deleted:!!s.deleted,base:r.base||s.updatedAt,dirty:false};
+    recs.set(k,v); puts.push([k,v]);
+  }
+  if(puts.length) await Store.putMany("docs",puts);
+  for(const k of dels) await Store.del("docs",k);
+  rebuild(); await dropOrphanImages();
+  const missing=[...usedImageIds()].filter(id=>!urlCache.has(id)).length;
+  busy(null); render(); updateSyncBadge();
+  setSave(`${keys.length}件の変更を破棄しました${missing?"（外した画像は次の同期で戻ります）":""}`);
+}
+async function replaceWithDrive(){
+  if(!Drive.configured()) throw new Error("Googleドライブの設定がまだです");
+  if(!navigator.onLine) throw new Error("オフラインのため、ドライブから読み込めません");
+  syncing=true;
+  try{
+    await Drive.signIn();
+    busy("ドライブの内容を読み込んでいます…");
+    const {remote}=await loadRemote(); const rdocs=remote.docs;
+    cancelTimers([...timers.keys()]);
+    const puts=[], dels=[];
+    for(const [k,r] of [...recs]){
+      if(rdocs[k]) continue;
+      if(r&&r.dirty){ dels.push(k); recs.delete(k); }   // ドライブにない＝この端末で作っただけの項目
+    }
+    for(const [k,R] of Object.entries(rdocs)){
+      const v={data:R.data,updatedAt:R.updatedAt,deleted:!!R.deleted,base:R.updatedAt,dirty:false};
+      recs.set(k,v); puts.push([k,v]);
+    }
+    await Store.putMany("docs",puts);
+    for(const k of dels) await Store.del("docs",k);
+    rebuild(); await dropOrphanImages(); await fetchMissingImages(remote.images);
+    const now=Date.now(); await kvSet("lastSync",now);
+    busy(null); render(); updateSyncBadge();
+    setSave("ドライブの内容に置き換えました");
+  }finally{ syncing=false; }
+}
+
 let syncing=false;
 async function sync(){
   if(syncing) return;
@@ -155,10 +270,7 @@ async function sync(){
     await Drive.signIn();              // ボタン操作の直後にログイン画面を出す
     flushAll();
     busy("ドライブと同期しています…");
-    const folder=await Drive.ensureFolder(await kvGet("folderId")); await kvSet("folderId",folder);
-    const fileId=await Drive.findData(folder,await kvGet("dataFileId"));
-    const remote=fileId?await Drive.readJson(fileId):{format:"kozo-drive",version:1,docs:{},images:{}};
-    if(remote.format!=="kozo-drive") throw new Error("ドライブのデータの形式が違います");
+    const {folder,fileId,remote}=await loadRemote();
     const rdocs=remote.docs||{}; const merged={...rdocs}; const toLocal=[]; const conflicts=[];
     const keys=new Set([...recs.keys(),...Object.keys(rdocs)]);
     const pack=L=>({data:L.data,updatedAt:L.updatedAt||Date.now(),deleted:!!L.deleted});
@@ -195,20 +307,14 @@ async function sync(){
     busy("台帳データを保存しています…");
     if(fileId) await Drive.updateJson(fileId,out); else await kvSet("dataFileId",await Drive.createJson(folder,out));
     // ドライブに書けてから、端末側を同期済みにする
+    toLocal.forEach(([,v])=>delete v.snap);
     await Store.putMany("docs",toLocal);
     for(const [k,v] of toLocal){
       if(timers.has(k)) continue; // 同期中に入力されたものは、端末側の最新を優先
       recs.set(k,v);
     }
     rebuild();
-    // 画像：使われていて端末にない画像を取ってくる
-    const used=new Set(); [...chars,...setts].forEach(c=>(c.images||[]).forEach(im=>used.add(im.id)));
-    let dn=0;
-    for(const id of used){
-      if(limgs.has(id)||!rimgs[id]) continue;
-      busy(`画像を受け取っています…（${++dn}）`);
-      try{ const b=await Drive.downloadBlob(rimgs[id].driveId); await Store.put("images",id,{blob:b,driveId:rimgs[id].driveId,name:id}); urlCache.set(id,URL.createObjectURL(b)); }catch(e){}
-    }
+    await fetchMissingImages(rimgs);
     const now=Date.now(); await kvSet("lastSync",now);
     busy(null); render(); updateSyncBadge();
     setSave(`同期しました（${new Date(now).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}）`);
@@ -246,7 +352,10 @@ function planImport(text,out){
   if(!todo.length&&!imgs.length) return;
   $("#i-apply").onclick=async()=>{
     $("#i-apply").disabled=true;
-    const pairs=todo.map(i=>{const r={data:i.data,updatedAt:i.iu,base:(recs.get(i.key)||{}).base||0,dirty:true,deleted:false}; recs.set(i.key,r); return [i.key,r];});
+    const pairs=todo.map(i=>{const cur=recs.get(i.key);
+      const snap=!cur?null:cur.dirty?("snap" in cur?cur.snap:undefined):{data:cur.data,updatedAt:cur.updatedAt,deleted:!!cur.deleted};
+      const r={data:i.data,updatedAt:i.iu,base:(cur||{}).base||0,dirty:true,deleted:false}; if(snap!==undefined) r.snap=snap;
+      recs.set(i.key,r); return [i.key,r];});
     await Store.putMany("docs",pairs);
     let ni=0;
     for(const [id,im] of imgs){
@@ -468,6 +577,44 @@ function appearances(c){
   const r=ranges();
   return eps.filter(e=>{const t=[e.title,e.summary,e.presents,(e.parts||[]).map(p=>p.title+" "+p.beats).join(" ")].join(" ");return al.some(a=>t.includes(a))}).map(e=>({e,x:r[e.id]}));
 }
+/* 関係：[{name, cid, text}]。古い形（1行に1人の文章）は表示のときに読み替える */
+function relsOf(c){
+  if(Array.isArray(c.rels)) return c.rels;
+  return String(c.relations||"").split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{
+    const m=l.match(/^([^：:]{1,30})[：:]\s*(.*)$/); return m?{name:m[1].trim(),cid:"",text:m[2]}:{name:"",cid:"",text:l};});
+}
+function relsText(rels){return rels.filter(r=>r.name||r.text).map(r=>{const n=relName(r); const t=String(r.text||"").replace(/\n/g," "); return n?`${n}：${t}`:t;}).join("\n")}
+function charByName(n){
+  n=String(n||"").trim(); if(!n) return null;
+  return chars.find(c=>c.name===n)||chars.find(c=>aliasesOf(c).includes(n))||null;
+}
+function relChars(r){ // 関係の相手（キャラクター欄にいる人物）。「ギア・ゼナ」のような並びも見る
+  const byId=r.cid&&chars.find(c=>c.id===r.cid); if(byId) return [byId];
+  const whole=charByName(r.name); if(whole) return [whole];
+  const parts=String(r.name||"").split(/[・、,，]/).map(x=>x.trim()).filter(Boolean);
+  if(parts.length>1){ const cs=parts.map(charByName); if(cs.every(Boolean)) return cs; }
+  return [];
+}
+function relName(r){const byId=r.cid&&chars.find(c=>c.id===r.cid); return byId?byId.name:(r.name||"")}
+function relIconHTML(r){
+  return relChars(r).filter(c=>c.images&&c.images[0]).map(c=>`<button class="av rav" data-gochar="${c.id}" title="${esc(c.name)}を開く"><img src="${blob(c.images[0].id)}" alt="${esc(c.name)}"></button>`).join("");
+}
+function relsHTML(c){
+  const rels=relsOf(c);
+  return `<div class="block"><span class="hint">関係</span>
+    <div class="rels">${rels.map((r,i)=>`<div class="rel" data-ri="${i}">
+      <div class="ricons" id="ri-${i}">${relIconHTML(r)}</div>
+      <input class="rname" data-rn="${i}" list="relnames" value="${esc(relName(r))}" placeholder="相手の名前" aria-label="相手の名前">
+      <textarea class="rtext" data-rt="${i}" rows="${Math.max(1,rowsFor(r.text,1)-1)}" placeholder="関係（自由記述）" aria-label="関係の内容">${esc(r.text)}</textarea>
+      <button class="btn sm rdel" data-rdel="${i}" title="この関係を削除" aria-label="この関係を削除">×</button>
+    </div>`).join("")||`<div class="empty">まだ関係はありません。</div>`}</div>
+    <datalist id="relnames">${chars.filter(x=>x.id!==c.id).map(x=>`<option value="${esc(x.name)}">`).join("")}</datalist>
+    <button class="btn sm" id="r-add" style="margin-top:8px">＋ 関係を追加</button></div>`;
+}
+function editRels(id,mut){
+  edit(id,o=>{ const rels=structuredClone(relsOf(o)); mut(rels); o.rels=rels; o.relations=relsText(rels); });
+}
+
 function charListHTML(){
   const ql=cq.trim(); let html="", last=null;
   chars.forEach(c=>{
@@ -547,7 +694,7 @@ function renderChars(){
       ${ta("personality","性格・口調・癖",3)}
       ${ta("appearance","外見",2)}
       ${ta("arc","物語での変化・テーマ・終盤",3)}
-      ${ta("relations","関係（1行に1人）",2)}
+      ${relsHTML(c)}
       ${ta("memo","未決・★案",2)}
     </div>
   </section></div>`;
@@ -568,6 +715,22 @@ function wireChars(c,id){
     if(im) removeImage(im.id);
   });
   document.querySelectorAll("[data-goep]").forEach(el=>el.onclick=()=>{selId=el.dataset.goep; view="edit"; window._mobileEditing=true; saveView(); render(); window.scrollTo({top:0})});
+  // 関係
+  const wireIcons=()=>document.querySelectorAll("[data-gochar]").forEach(el=>el.onclick=()=>{charSel=el.dataset.gochar; try{localStorage.setItem("kozo.char",charSel)}catch(e){} render(); window.scrollTo({top:0})});
+  wireIcons();
+  document.querySelectorAll("[data-rn]").forEach(el=>el.oninput=ev=>{
+    const i=+el.dataset.rn, v=ev.target.value; const hit=chars.find(x=>x.name===v.trim());
+    editRels(id,rels=>{ rels[i].name=v.trim(); rels[i].cid=hit?hit.id:""; });
+    const cur=chars.find(x=>x.id===c.id); $("#ri-"+i).innerHTML=relIconHTML(relsOf(cur)[i]); wireIcons();
+  });
+  document.querySelectorAll("[data-rt]").forEach(el=>el.oninput=ev=>{const i=+el.dataset.rt; editRels(id,rels=>{rels[i].text=ev.target.value});});
+  document.querySelectorAll("[data-rdel]").forEach(el=>el.onclick=()=>{
+    const i=+el.dataset.rdel;
+    if(pendingDelete!=="rel"+i){ pendingDelete="rel"+i; el.textContent="削除する"; el.classList.add("danger"); return; }
+    pendingDelete=null; editRels(id,rels=>rels.splice(i,1)); render();
+  });
+  $("#r-add").onclick=()=>{ editRels(id,rels=>rels.push({name:"",cid:"",text:""})); render();
+    const ins=document.querySelectorAll("[data-rn]"); const last=ins[ins.length-1]; if(last) last.focus(); };
   $("#c-back").onclick=()=>{window._mobileEditing=false; render();};
   $("#c-add").onclick=()=>addChar(c.id);
   $("#c-up").onclick=()=>moveChar(c.id,-1); $("#c-down").onclick=()=>moveChar(c.id,1);
@@ -602,7 +765,7 @@ function moveChar(cid,dir){
 async function addChar(afterId){
   const i=afterId?chars.findIndex(c=>c.id===afterId):-1; const prev=chars[i], next=chars[i+1];
   const order=prev?(next?(prev.order+next.order)/2:prev.order+10):10;
-  const body={name:"新しい人物",aliases:"",group:prev?prev.group:"主人公たち",role:"",status:"検討中",orb:"",first:"",profile:"",personality:"",appearance:"",arc:"",relations:"",memo:"",images:[],order};
+  const body={name:"新しい人物",aliases:"",group:prev?prev.group:"主人公たち",role:"",status:"検討中",orb:"",first:"",profile:"",personality:"",appearance:"",arc:"",relations:"",rels:[],memo:"",images:[],order};
   charSel=await addDoc("c",body); window._mobileEditing=true; render();
 }
 
@@ -841,7 +1004,7 @@ async function renderSyncCard(){
       <div><b>Googleドライブ</b>
         <p class="hint">${Drive.configured()?`保存先：マイドライブ「${esc(Drive.FOLDER)}」フォルダ`:"まだ設定されていません（config.js にクライアントIDを入れてください）"}</p>
         <p class="hint">前回の同期：${last?new Date(last).toLocaleString("ja-JP"):"まだありません"}／未同期 ${n}件</p>
-        <button class="btn sm primary" id="s-sync">今すぐ同期</button></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm primary" id="s-sync">今すぐ同期</button><button class="btn sm danger" id="s-discard">変更を破棄</button></div></div>
       <div><b>取り込む</b><p class="hint">claude.ai の台帳や、控えのファイル（JSON）から読み込みます。新しい方が残ります。</p>
         <label class="btn sm">ファイルを選ぶ<input type="file" id="s-file" accept=".json,application/json" hidden></label>
         <div id="s-plan"></div></div>
@@ -850,6 +1013,7 @@ async function renderSyncCard(){
       <div><b>この端末</b><p class="hint">アプリの版：${APP_VERSION}<br>${quota}${quota?"／":""}${persisted?"データは自動では消されない設定です":"空き容量が少ないと、ブラウザがデータを消すことがあります。こまめに同期してください"}</p></div>
     </div></div>`);
   $("#s-sync").onclick=()=>sync();
+  $("#s-discard").onclick=()=>openDiscard();
   $("#s-file").onchange=async ev=>{const f=ev.target.files[0]; ev.target.value=""; if(f) planImport(await f.text(),$("#s-plan"));};
   $("#s-dl").onclick=()=>{const d=new Date(); downloadFile(`宿命刻の姫君_控え_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}.json`,JSON.stringify(exportPayload()));};
 }
@@ -871,6 +1035,7 @@ function renderWelcome(){
 
 /* ---------- 起動 ---------- */
 $("#b-sync").onclick=()=>sync();
+$("#b-discard").onclick=()=>openDiscard();
 (async()=>{
   try{ if(navigator.storage&&navigator.storage.persist) await navigator.storage.persist(); }catch(e){}
   try{
@@ -881,7 +1046,7 @@ $("#b-sync").onclick=()=>sync();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v5";
+const APP_VERSION="kozo-v6";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
