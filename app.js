@@ -847,7 +847,7 @@ async function renderSyncCard(){
         <div id="s-plan"></div></div>
       <div><b>控えを書き出す</b><p class="hint">この端末の内容をファイル（JSON）に保存します。画像は含まれません。</p>
         <button class="btn sm" id="s-dl">ファイルに保存</button></div>
-      <div><b>この端末</b><p class="hint">${quota}${quota?"／":""}${persisted?"データは自動では消されない設定です":"空き容量が少ないと、ブラウザがデータを消すことがあります。こまめに同期してください"}</p></div>
+      <div><b>この端末</b><p class="hint">アプリの版：${APP_VERSION}<br>${quota}${quota?"／":""}${persisted?"データは自動では消されない設定です":"空き容量が少ないと、ブラウザがデータを消すことがあります。こまめに同期してください"}</p></div>
     </div></div>`);
   $("#s-sync").onclick=()=>sync();
   $("#s-file").onchange=async ev=>{const f=ev.target.files[0]; ev.target.value=""; if(f) planImport(await f.text(),$("#s-plan"));};
@@ -880,6 +880,20 @@ $("#b-sync").onclick=()=>sync();
   rebuild(); loaded=true; render(); updateSyncBadge();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
-if("serviceWorker" in navigator) window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+/* 新しい版が届いたら、保存を済ませてから自動で切り替える */
+const APP_VERSION="kozo-v5";
+if("serviceWorker" in navigator){
+  const hadController=!!navigator.serviceWorker.controller; let reloading=false;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{
+    if(!hadController||reloading) return; reloading=true;
+    flushAll(); setSave("新しい版に切り替えています…");
+    setTimeout(()=>location.reload(),600);
+  });
+  window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").then(r=>{
+    // 開いているあいだも、ときどき新しい版を確かめる
+    setInterval(()=>r.update().catch(()=>{}),30*60*1000);
+    document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") r.update().catch(()=>{}); });
+  }).catch(()=>{}));
+}
 
 })();

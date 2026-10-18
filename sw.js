@@ -1,10 +1,11 @@
 /* オフラインでも開けるように、アプリ本体を端末に保存しておく */
-const VERSION = "kozo-v4";
+const VERSION = "kozo-v5";
 const SHELL = ["./", "./index.html", "./app.js", "./store.js", "./drive.js", "./config.js", "./styles.css",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png"];
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // 新しい版は、ブラウザの一時保存を通さず必ずサーバーから取り直す
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSION && k !== "kozo-fonts").map(k => caches.delete(k)))).then(() => self.clients.claim()));
@@ -29,7 +30,7 @@ self.addEventListener("fetch", e => {
   e.respondWith(caches.open(VERSION).then(async c => {
     const key = req.mode === "navigate" ? "./index.html" : req;
     const hit = await c.match(key, { ignoreSearch: true });
-    const net = fetch(req).then(r => { if (r.ok) c.put(key, r.clone()); return r; }).catch(() => null);
+    const net = fetch(req, { cache: "no-cache" }).then(r => { if (r.ok) c.put(key, r.clone()); return r; }).catch(() => null);
     return hit || (await net) || new Response("オフラインです", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }));
 });
