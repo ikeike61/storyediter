@@ -369,3 +369,20 @@ button.tl-h{cursor:pointer}
 .dl>div span{font-size:13px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
 .dl .do{background:var(--bad-soft)}.dl .do span{color:var(--bad)}
 .dl .dn{background:var(--ok-soft)}.dl .dn span{color:var(--ok)}
+
+/* ヘッダー：ロゴ（左上）・書き出しと同期（右上）・表示の切り替え（下段） */
+header.top{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand actions" "tabs tabs";align-items:start;gap:10px 16px}
+header.top .brand{grid-area:brand}
+.actions{grid-area:actions;display:flex;flex-direction:column;align-items:flex-end;gap:6px;padding-top:4px}
+.actbtns{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.status{display:flex;gap:8px;justify-content:flex-end;text-align:right;max-width:22em}
+header.top .tools{grid-area:tabs}
+.ic{width:16px;height:16px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.seg button{display:inline-flex;align-items:center;gap:6px}
+.actbtns .btn{display:inline-flex;align-items:center;gap:6px;position:relative}
+@media (max-width:560px){
+  .actbtns .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .actbtns .btn{padding:8px 10px}
+  .actbtns .ic{width:18px;height:18px}
+  .status{max-width:9em;font-size:11px}
+}

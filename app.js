@@ -870,7 +870,7 @@ function renderLore(){
   const modeBar=`<div class="seg lore-mode" role="group" aria-label="設定の表示"><button id="lm-items" aria-pressed="${loreMode==="items"}">項目</button><button id="lm-orbs" aria-pressed="${loreMode==="orbs"}">宿命刻（A〜Z）</button></div>`;
   if(loreMode==="orbs") return renderOrbs(modeBar);
   if(!setts.length){
-    m.innerHTML=`${modeBar}<div class="notice">まだ設定の項目がありません。<button class="btn primary" id="l-first">最初の項目を追加</button><br><span class="hint">設定資料から作った初期データは、「方針・編」タブの「取り込む」から読み込めます。</span></div>`;
+    m.innerHTML=`${modeBar}<div class="notice">まだ設定の項目がありません。<button class="btn primary" id="l-first">最初の項目を追加</button><br><span class="hint">設定資料から作った初期データは、「方針・シリーズ構成」タブの「取り込む」から読み込めます。</span></div>`;
     $("#l-first").onclick=()=>addLore(null); wireLoreMode(); return;
   }
   if(!setts.find(s=>s.id===loreSel)) loreSel=setts[0].id;
@@ -1553,7 +1553,7 @@ function saveView(){try{localStorage.setItem("kozo.view",view)}catch(e){}}
 ["edit","table","chars","lore","policy","manage"].forEach(v=>$("#v-"+v).onclick=()=>{view=v; saveView(); if(v!=="table"&&v!=="policy") window._mobileEditing=false; render();});
 
 
-/* ---------- 同期とデータ（方針・編タブ） ---------- */
+/* ---------- 同期とデータ（方針・シリーズ構成タブ） ---------- */
 async function renderSyncCard(){
   const host=document.querySelector(".policy"); if(!host) return;
   const last=await kvGet("lastSync"); const n=await unsyncedCount();
@@ -1617,7 +1617,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v14";
+const APP_VERSION="kozo-v15";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{

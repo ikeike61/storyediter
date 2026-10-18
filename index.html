@@ -27,21 +27,24 @@
     </span><span id="h-title" hidden></span></h1>
     <p id="h-tag"></p>
   </div>
-  <div class="tools">
-    <div class="seg" role="group" aria-label="表示">
-      <button id="v-edit" aria-pressed="true">エピソード</button>
-      <button id="v-table" aria-pressed="false">構成表</button>
-      <button id="v-chars" aria-pressed="false">キャラクター</button>
-      <button id="v-lore" aria-pressed="false">設定</button>
-      <button id="v-policy" aria-pressed="false">方針・編</button>
-      <button id="v-manage" aria-pressed="false">管理</button>
+  <div class="actions">
+    <div class="actbtns">
+      <button class="btn" id="b-export" title="Markdownで書き出す"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg><span class="lbl">Markdownで書き出す</span></button>
+      <button class="btn danger" id="b-discard" hidden title="前回の同期のあとの変更を取り消す"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg><span class="lbl">変更を破棄</span></button>
+      <button class="btn primary" id="b-sync" title="Googleドライブと同期"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3"/><path d="M7 21v-7h10v7"/></svg><span class="lbl">同期</span><span class="badge" hidden></span></button>
     </div>
-    <button class="btn" id="b-export">Markdownで書き出す</button>
-    <button class="btn danger" id="b-discard" hidden title="前回の同期のあとの変更を取り消す">変更を破棄</button>
-    <button class="btn primary" id="b-sync" title="Googleドライブと同期">同期<span class="badge" hidden></span></button>
-    <span id="net" aria-live="polite"></span>
-    <span class="save" id="save" aria-live="polite"></span>
+    <div class="status"><span id="net" aria-live="polite"></span><span class="save" id="save" aria-live="polite"></span></div>
   </div>
+  <nav class="tools" aria-label="表示の切り替え">
+    <div class="seg" role="group" aria-label="表示">
+      <button id="v-edit" aria-pressed="true"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/><path d="M4 20h6"/></svg>エピソード</button>
+      <button id="v-table" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h10a2 2 0 0 1 2 2v2h-4"/><path d="M16 5v13a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-1h10v1a3 3 0 0 0 3 3"/><path d="M8 3a2 2 0 0 0-2 2v12"/><path d="M9.5 8.5h3.5M9.5 12h3.5"/></svg>構成表</button>
+      <button id="v-chars" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>キャラクター</button>
+      <button id="v-lore" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v5M10 4h4"/><path d="M5 21V12l7-5 7 5v9"/><path d="M3 21h18"/><path d="M10 21v-4a2 2 0 0 1 4 0v4"/></svg>設定</button>
+      <button id="v-policy" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>方針・シリーズ構成</button>
+      <button id="v-manage" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5l1.6 2.4 2.8-.8.6 2.8 2.7 1.1-1 2.7 1.8 2.3-2.3 1.8.3 2.9-2.9.3-1.3 2.6-2.6-1.3L9.4 20l-1.3-2.6-2.9-.3.3-2.9L3.2 12.4 5 10.1 4 7.4l2.7-1.1.6-2.8 2.8.8z"/></svg>管理</button>
+    </div>
+  </nav>
 </header>
 <div class="stats" id="stats"></div>
 
