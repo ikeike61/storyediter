@@ -7,6 +7,7 @@ let eps=[], meta=null, loaded=false, view="edit", selId=null, q="";
 let pendingDelete=null, exportOpen=false;
 let chars=[], charSel=null, cq="";
 let setts=[], orbs=[], loreSel=null, lq="", loreMode="items";
+let threads=[], decisions=[]; // 伏線（f:）と決定ログ（d:）
 try{loreSel=localStorage.getItem("kozo.lore"); loreMode=localStorage.getItem("kozo.loreMode")||"items";}catch(e){}
 const CHAR_STATUSES=["決定","決定（細部は検討中）","決定（名前未定）","決定（中身未定）","検討中","未配置"];
 try{charSel=localStorage.getItem("kozo.char");}catch(e){}
@@ -33,11 +34,11 @@ const recs=new Map(); // "meta" / "e:<id>" / "c:<id>" / "s:<id>"（設定） / "
 const urlCache=new Map(); // 画像ID → 表示用URL
 const PLACEHOLDER="data:image/svg+xml;utf8,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3 4"><rect width="3" height="4" fill="#8888"/></svg>');
 const stripId=o=>{const {id:_,...b}=o;return b};
-const keyOf=id=>id==="__meta"?"meta":/^[cso]:/.test(id)?id:"e:"+id;
+const keyOf=id=>id==="__meta"?"meta":/^[csofd]:/.test(id)?id:"e:"+id;
 function blob(id){return urlCache.get(id)||PLACEHOLDER}
 function defaultMeta(){return {title:"宿命刻の姫君",tagline:"",logline:"",policy:"",arcs:[]}}
 function rebuild(){
-  eps=[]; chars=[]; setts=[]; orbs=[]; let m=null;
+  eps=[]; chars=[]; setts=[]; orbs=[]; threads=[]; decisions=[]; let m=null;
   for(const [k,r] of recs){
     if(!r||r.deleted||!r.data) continue;
     if(k==="meta") m={...r.data};
@@ -45,7 +46,10 @@ function rebuild(){
     else if(k.startsWith("c:")) chars.push({id:k.slice(2),...structuredClone(r.data)});
     else if(k.startsWith("s:")) setts.push({id:k.slice(2),...structuredClone(r.data)});
     else if(k.startsWith("o:")) orbs.push({id:k.slice(2),...structuredClone(r.data)});
+    else if(k.startsWith("f:")) threads.push({id:k.slice(2),...structuredClone(r.data)});
+    else if(k.startsWith("d:")) decisions.push({id:k.slice(2),...structuredClone(r.data)});
   }
+  decisions.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   eps.sort((a,b)=>(a.order||0)-(b.order||0)); chars.sort((a,b)=>(a.order||0)-(b.order||0));
   setts.sort((a,b)=>(a.order||0)-(b.order||0)); orbs.sort((a,b)=>String(a.letter||a.id).localeCompare(String(b.letter||b.id)));
   meta=m||defaultMeta(); meta.arcs=meta.arcs||[];
@@ -71,14 +75,14 @@ window.addEventListener("pagehide",flushAll);
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushAll(); });
 function edit(id,mut){
   const cid=id.slice(2);
-  const obj=id==="__meta"?meta:id.startsWith("c:")?chars.find(c=>c.id===cid):id.startsWith("s:")?setts.find(c=>c.id===cid):id.startsWith("o:")?orbs.find(c=>c.id===cid):eps.find(e=>e.id===id);
+  const obj=id==="__meta"?meta:id.startsWith("c:")?chars.find(c=>c.id===cid):id.startsWith("s:")?setts.find(c=>c.id===cid):id.startsWith("o:")?orbs.find(c=>c.id===cid):id.startsWith("f:")?threads.find(c=>c.id===cid):id.startsWith("d:")?decisions.find(c=>c.id===cid):eps.find(e=>e.id===id);
   if(!obj) return;
   mut(obj);
   touch(keyOf(id),structuredClone(stripId(obj)),false);
 }
 function newId(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 async function addDoc(kind,body){
-  const id=newId({c:"ch",s:"st"}[kind]||"ep"); const key=(kind==="c"||kind==="s"?kind+":":"e:")+id;
+  const id=newId({c:"ch",s:"st",f:"fs",d:"dc"}[kind]||"ep"); const key=("csfd".includes(kind)?kind+":":"e:")+id;
   touch(key,body,false); await persist(key); rebuild(); return id;
 }
 async function removeDoc(id){
@@ -131,7 +135,7 @@ async function updateSyncBadge(){
 window.addEventListener("online",updateSyncBadge); window.addEventListener("offline",updateSyncBadge);
 
 const stable=v=>Array.isArray(v)?"["+v.map(stable).join(",")+"]":(v&&typeof v==="object")?"{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+stable(v[k])).join(",")+"}":JSON.stringify(v);
-function labelKey(k,d){if(k==="meta")return "作品情報・編"; if(k.startsWith("o:"))return "宿命刻 "+k.slice(2); return ({c:"キャラクター「",s:"設定「"}[k[0]]||"エピソード「")+((d&&(d.title||d.name))||"?")+"」"}
+function labelKey(k,d){if(k==="meta")return "作品情報・編"; if(k.startsWith("o:"))return "宿命刻 "+k.slice(2); if(k.startsWith("d:")) return "決定ログ「"+((d&&d.item)||"?")+"」"; return ({c:"キャラクター「",s:"設定「",f:"伏線「"}[k[0]]||"エピソード「")+((d&&(d.title||d.name))||"?")+"」"}
 
 function chooseConflicts(list){
   return new Promise(res=>{
@@ -329,7 +333,9 @@ function exportPayload(){
     meta:stripId(meta), episodes:eps.map(e=>{const r=recs.get("e:"+e.id);return {...e,updatedAt:r&&r.updatedAt||0}}),
     characters:chars.map(c=>{const r=recs.get("c:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}}),
     settings:setts.map(c=>{const r=recs.get("s:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}}),
-    orbs:orbs.map(c=>{const r=recs.get("o:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}})};
+    orbs:orbs.map(c=>{const r=recs.get("o:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}}),
+    threads:threads.map(c=>{const r=recs.get("f:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}}),
+    decisions:decisions.map(c=>{const r=recs.get("d:"+c.id);return {...c,updatedAt:r&&r.updatedAt||0}})};
 }
 function downloadFile(name,text,type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type:type||"application/json"}));
@@ -345,6 +351,7 @@ function planImport(text,out){
     items.push({key,data,iu,action}); };
   consider("meta",d.meta); (d.episodes||[]).forEach(e=>consider("e:"+e.id,e)); (d.characters||[]).forEach(c=>consider("c:"+c.id,c));
   (d.settings||[]).forEach(c=>consider("s:"+c.id,c)); (d.orbs||[]).forEach(c=>consider("o:"+c.id,c));
+  (d.threads||[]).forEach(c=>consider("f:"+c.id,c)); (d.decisions||[]).forEach(c=>consider("d:"+c.id,c));
   const todo=items.filter(i=>i.action!=="skip"); const cnt=a=>items.filter(i=>i.action===a).length;
   const imgs=Object.entries(d.images||{}).filter(([id])=>!urlCache.has(id));
   out.innerHTML=`<div class="plan"><p>追加 <b>${cnt("add")}</b>・更新 <b>${cnt("update")}</b>・変更なし（端末の方が新しい） <b>${cnt("skip")}</b>${imgs.length?`・画像 <b>${imgs.length}</b>`:""}</p>
@@ -371,7 +378,8 @@ function planImport(text,out){
 function renderHead(){
   if(meta){ const t=meta.title||"宿命刻の姫君", isLogo=t==="宿命刻の姫君"; // 作品名を変えたときは文字で表示する
     $("#h-title").textContent=t; $("#h-title").hidden=isLogo; $("#h-logo").hidden=!isLogo; $("#h-tag").textContent=meta.tagline||""; document.title=t+" 構成台帳"; }
-  ["edit","table","chars","lore","policy"].forEach(v=>$("#v-"+v).setAttribute("aria-pressed",String(view===v)));
+  ["edit","table","chars","lore","policy","manage"].forEach(v=>$("#v-"+v).setAttribute("aria-pressed",String(view===v)));
+  if(view==="manage"){ $("#stats").innerHTML=loaded?mgStats():""; return; }
   if(view==="lore"){ $("#stats").innerHTML=loaded?`<span>設定の項目 <b>${setts.length}</b></span><span>未決 <b>${setts.filter(s=>s.status==="未決").length}</b></span><span>宿命刻 <b>${orbs.filter(o=>o.holder&&o.holder.trim()).length}</b>／${orbs.length||26}</span>`:""; return; }
   if(view==="chars"){ $("#stats").innerHTML=loaded?`<span>キャラクター <b>${chars.length}</b></span><span>画像あり <b>${chars.filter(c=>c.images&&c.images.length).length}</b></span>`:""; return; }
   const r=ranges(); const total=eps.reduce((s,e)=>s+count(e),0);
@@ -391,6 +399,7 @@ function render(){
   if(view==="chars") return renderChars();
   if(view==="table") return renderTable();
   if(view==="policy") return renderPolicy();
+  if(view==="manage") return renderManage();
   renderEdit();
 }
 
@@ -572,7 +581,7 @@ function renderPolicy(){
 }
 
 /* ---------- キャラクター ---------- */
-function aliasesOf(c){return String(c.aliases||c.name||"").split(/[,、，]/).map(s=>s.trim()).filter(s=>s.length>=2)}
+function aliasesOf(c){return [...new Set([c.name,...String(c.aliases||"").split(/[,、，]/)].map(s=>String(s||"").trim()).filter(s=>s.length>=2))]}
 function appearances(c){
   const al=aliasesOf(c); if(!al.length) return [];
   const r=ranges();
@@ -929,6 +938,385 @@ function renderOrbs(modeBar){
   wireLoreMode();
 }
 
+/* ---------- 管理（表記・伏線・宿命刻の回収・連載・未決・登場表） ---------- */
+let mgMode="names", thSel=null, castGap=5, openFilter="all", openQ="", openStar=false, orbAt=null;
+try{mgMode=localStorage.getItem("kozo.mg")||"names"; thSel=localStorage.getItem("kozo.th");}catch(e){}
+const MG_MODES=[["names","表記チェック"],["threads","伏線"],["orbs","宿命刻の回収"],["serial","連載"],["open","未決"],["cast","登場表"]];
+const epPos=id=>eps.findIndex(e=>e.id===id);
+function epOptions(sel,blank){return (blank!=null?`<option value="">${esc(blank)}</option>`:"")+eps.map((e,i)=>`<option value="${esc(e.id)}" ${e.id===sel?"selected":""}>EP${i+1} ${esc(e.title)}</option>`).join("")}
+function gotoEp(id){selId=id; view="edit"; window._mobileEditing=true; saveView(); try{localStorage.setItem("kozo.sel",id)}catch(e){} render(); window.scrollTo({top:0})}
+function gotoChar(id){charSel=id; view="chars"; window._mobileEditing=true; saveView(); try{localStorage.setItem("kozo.char",id)}catch(e){} render(); window.scrollTo({top:0})}
+function gotoDoc(docId){
+  if(docId==="__meta"){ view="policy"; saveView(); render(); return; }
+  const p=docId.slice(0,2), id=docId.slice(2);
+  if(p==="c:") return gotoChar(id);
+  if(p==="s:"){ loreSel=id; loreMode="items"; view="lore"; window._mobileEditing=true; saveView(); render(); window.scrollTo({top:0}); return; }
+  if(p==="o:"){ loreMode="orbs"; view="lore"; saveView(); render(); return; }
+  if(p==="f:"){ thSel=id; mgMode="threads"; view="manage"; saveView(); render(); return; }
+  gotoEp(docId);
+}
+function docLabel(docId){
+  if(docId==="__meta") return "作品情報・方針";
+  const p=docId.slice(0,2), id=docId.slice(2);
+  if(p==="c:"){const c=chars.find(x=>x.id===id); return `キャラ「${c?c.name:"?"}」`;}
+  if(p==="s:"){const s=setts.find(x=>x.id===id); return `設定「${s?s.title:"?"}」`;}
+  if(p==="o:") return `宿命刻 ${id}`;
+  if(p==="f:"){const t=threads.find(x=>x.id===id); return `伏線「${t?t.title:"?"}」`;}
+  const i=epPos(docId); return i<0?"（削除されたEP）":`EP${i+1}「${eps[i].title}」`;
+}
+function mgStats(){
+  const warn=threads.filter(t=>checkThread(t).length).length;
+  return `<span>伏線 <b>${threads.length}</b>${warn?`（要確認 <b>${warn}</b>）`:""}</span><span>未決 <b>${collectOpen().length}</b></span><span>決定ログ <b>${decisions.length}</b></span>`;
+}
+function renderManage(){
+  const m=$("#main");
+  m.innerHTML=`<div class="seg mg-mode" role="group" aria-label="管理の表示">${MG_MODES.map(([k,l])=>`<button data-mg="${k}" aria-pressed="${mgMode===k}">${l}</button>`).join("")}</div><div id="mg"></div>`;
+  document.querySelectorAll("[data-mg]").forEach(b=>b.onclick=()=>{mgMode=b.dataset.mg; try{localStorage.setItem("kozo.mg",mgMode)}catch(e){} render();});
+  ({names:mgNames,threads:mgThreads,orbs:mgOrbs,serial:mgSerial,open:mgOpen,cast:mgCast}[mgMode]||mgNames)($("#mg"));
+}
+
+/* 1. 表記チェック：旧表記の残りを探して置き換える */
+const RENAME_SEED=[
+  {from:"エルメンヒルト",to:"イレーネ",note:"聖女の名前（2026-10-09）"},
+  {from:"ジード",to:"オルヴァ",note:"宿命刻の読み（2026-10-11）"},
+  {from:"G巨神",to:"D破壊",note:"ギアの宿命刻（2026-10-16）"},
+  {from:"G（ギア）",to:"D（ギア）",note:"ギアの宿命刻（2026-10-16）"},
+  {from:"22刻",to:"26刻",note:"宿命刻の数（2026-10-16）"},
+  {from:"22柱",to:"26柱",note:"旧神の数（2026-10-16）"},
+  {from:"聖堂教院",to:"聖導教院",note:"表記ゆれ"},
+  {from:"神聖騎士隊",to:"星煌騎士団",note:"術師編の配下（2026-10-09）"}];
+const SKIP_KEYS=new Set(["id","order","ep","cid","arc","appearEp","collectEp","joinPrev","web","renames","plan","status","fate","kind","role","letter"]);
+const FIELD_LABEL={title:"題",summary:"内容",presents:"提示するもの",memo:"メモ",open:"未決",beats:"流れ",note:"補足",tone:"トーン",orb:"宿命刻",source:"元の資料",
+  name:"名前",aliases:"呼び名",role:"役割",group:"区分",first:"初登場",profile:"基本設定",personality:"性格",appearance:"外見",arc:"変化・終盤",relations:"関係",rels:"関係",text:"内容",caption:"画像の説明",
+  body:"本文",keywords:"キーワード",category:"区分",holder:"保持者",tagline:"キャッチ",logline:"ログライン",policy:"方針",arcs:"編",parts:"各話",images:"画像",steps:"段階"};
+function walkStrings(v,path,cb){
+  if(typeof v==="string"){ cb(path,v); return; }
+  if(Array.isArray(v)){ v.forEach((x,i)=>walkStrings(x,[...path,i],cb)); return; }
+  if(v&&typeof v==="object") for(const k of Object.keys(v)) if(!SKIP_KEYS.has(k)) walkStrings(v[k],[...path,k],cb);
+}
+const getPath=(o,p)=>p.reduce((a,k)=>a==null?a:a[k],o);
+function setPath(o,p,val){const last=p[p.length-1]; const parent=getPath(o,p.slice(0,-1)); if(parent!=null) parent[last]=val;}
+function pathLabel(p){const names=p.filter(k=>typeof k==="string").map(k=>FIELD_LABEL[k]||k); const nums=p.filter(k=>typeof k==="number"); return names.join("・")+(p[0]==="parts"&&nums.length?`（第${nums[0]+1}話）`:"");}
+function allDocs(){return [["__meta",meta],...eps.map(e=>[e.id,e]),...chars.map(c=>["c:"+c.id,c]),...setts.map(s=>["s:"+s.id,s]),...orbs.map(o=>["o:"+o.id,o]),...threads.map(t=>["f:"+t.id,t])];}
+function scanNames(rules){
+  const hits=[];
+  rules.forEach((r,ri)=>{ if(!r.from) return;
+    for(const [docId,doc] of allDocs()) walkStrings(doc,[],(path,s)=>{
+      let i=s.indexOf(r.from);
+      while(i>=0){
+        const pre=s.slice(Math.max(0,i-8),i), post=s.slice(i+r.from.length,i+r.from.length+8);
+        const hist=/旧|元の|以前|かつての名/.test(pre)||/^[」』）)]?(から|より)(変更|差し替|改名|変え)/.test(post);
+        hits.push({ri,docId,path,idx:i,hist,pre:s.slice(Math.max(0,i-24),i),post:s.slice(i+r.from.length,i+r.from.length+24)});
+        i=s.indexOf(r.from,i+r.from.length);
+      }
+    });
+  });
+  return hits;
+}
+function applyReplacements(list,rules){
+  const groups=new Map();
+  list.forEach(h=>{const k=h.docId+"\u0000"+JSON.stringify(h.path); if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(h);});
+  for(const hs of groups.values()){
+    hs.sort((a,b)=>b.idx-a.idx);
+    edit(hs[0].docId,o=>{ let s=getPath(o,hs[0].path); if(typeof s!=="string") return;
+      for(const h of hs){ const r=rules[h.ri]; if(s.substr(h.idx,r.from.length)===r.from) s=s.slice(0,h.idx)+r.to+s.slice(h.idx+r.from.length); }
+      setPath(o,hs[0].path,s); });
+  }
+}
+function mgNames(host){
+  const rules=meta.renames||[];
+  const hits=scanNames(rules); const live=hits.filter(h=>!h.hist);
+  const missingSeed=RENAME_SEED.filter(s=>!rules.some(r=>r.from===s.from));
+  host.innerHTML=`<div class="card">
+    <h2 class="sec">読み替えの対応表</h2>
+    <div class="hint">改名や表記の変更を登録しておくと、台帳全体から旧表記の残りを探します。</div>
+    <div class="rnlist">${rules.map((r,i)=>`<div class="rn"><input data-rf="${i}" value="${esc(r.from)}" placeholder="旧表記" aria-label="旧表記"><span aria-hidden="true">→</span><input data-rt2="${i}" value="${esc(r.to)}" placeholder="新表記" aria-label="新表記"><input class="rnote" data-rno="${i}" value="${esc(r.note)}" placeholder="メモ（いつ・なぜ）" aria-label="メモ"><button class="btn sm" data-rdel2="${i}" aria-label="削除">×</button></div>`).join("")||`<div class="empty">まだ登録がありません。</div>`}</div>
+    <div class="btnrow"><button class="btn sm" id="rn-add">＋ 追加</button>${missingSeed.length?`<button class="btn sm primary" id="rn-seed">設定資料の変更履歴から追加（${missingSeed.length}件）</button>`:""}</div>
+  </div>
+  <div class="card">
+    <h2 class="sec">旧表記の残り <span class="hint" style="letter-spacing:0">${hits.length}か所（うち記録として残していそうなもの ${hits.length-live.length}）</span></h2>
+    ${hits.length?`<div class="hint">「旧〜」「〜から変更」のように、変更の記録として書いている箇所には「記録」の印を付け、一括置き換えから外しています。</div>
+    <div class="btnrow">${live.length?`<button class="btn sm primary" id="rn-all">記録以外をすべて置き換える（${live.length}か所）</button>`:""}</div>`:`<div class="empty">${rules.length?"旧表記は見つかりませんでした。":"対応表を登録すると、ここに結果が出ます。"}</div>`}
+    ${rules.map((r,ri)=>{const hs=hits.filter(h=>h.ri===ri); if(!hs.length) return "";
+      return `<h3 class="sub">${esc(r.from)} → ${esc(r.to)}<span>${hs.length}</span></h3><div class="hits">${hs.map(h=>{const n=hits.indexOf(h); return `<div class="hit">
+        <button class="loc" data-go="${esc(h.docId)}">${esc(docLabel(h.docId))}<span>${esc(pathLabel(h.path))}</span></button>
+        <div class="snip">…${esc(h.pre)}<mark>${esc(r.from)}</mark>${esc(h.post)}…</div>
+        <div class="hb">${h.hist?`<span class="chip">記録</span>`:""}<button class="btn sm" data-rep="${n}">置き換え</button></div></div>`;}).join("")}</div>`;}).join("")}
+  </div>`;
+  const setRules=mut=>{ edit("__meta",o=>{o.renames=structuredClone(o.renames||[]); mut(o.renames);}); };
+  host.querySelectorAll("[data-rf]").forEach(el=>el.onchange=ev=>{setRules(r=>r[+el.dataset.rf].from=ev.target.value.trim()); render();});
+  host.querySelectorAll("[data-rt2]").forEach(el=>el.onchange=ev=>{setRules(r=>r[+el.dataset.rt2].to=ev.target.value.trim()); render();});
+  host.querySelectorAll("[data-rno]").forEach(el=>el.oninput=ev=>setRules(r=>r[+el.dataset.rno].note=ev.target.value));
+  host.querySelectorAll("[data-rdel2]").forEach(el=>el.onclick=()=>{setRules(r=>r.splice(+el.dataset.rdel2,1)); render();});
+  $("#rn-add").onclick=()=>{setRules(r=>r.push({from:"",to:"",note:""})); render(); const ins=host.querySelectorAll("[data-rf]"); ins[ins.length-1]?.focus();};
+  if($("#rn-seed")) $("#rn-seed").onclick=()=>{setRules(r=>missingSeed.forEach(s=>r.push({...s}))); render();};
+  if($("#rn-all")) $("#rn-all").onclick=()=>{applyReplacements(live,rules); setSave(`${live.length}か所を置き換えました`); render();};
+  host.querySelectorAll("[data-rep]").forEach(el=>el.onclick=()=>{applyReplacements([hits[+el.dataset.rep]],rules); render();});
+  host.querySelectorAll("[data-go]").forEach(el=>el.onclick=()=>gotoDoc(el.dataset.go));
+}
+
+/* 2. 伏線：張る→段階→回収をエピソードの並びの上で見る */
+const TH_KINDS=["伏線","段階","謎"], TH_ROLES=["張る","段階","回収"];
+function checkThread(t){
+  const out=[]; const st=t.steps||[];
+  if(!st.length) return ["まだ段階がありません"];
+  const gone=st.filter(s=>s.ep&&epPos(s.ep)<0).length; if(gone) out.push(`削除されたエピソードを指している段階が${gone}件あります`);
+  if(st.some(s=>!s.ep)) out.push("エピソードが未設定の段階があります");
+  if(t.kind!=="段階"&&!st.some(s=>s.role==="回収")) out.push("まだ回収されていません");
+  for(let i=1;i<st.length;i++){ const a=epPos(st[i-1].ep), b=epPos(st[i].ep);
+    if(a>=0&&b>=0&&b<a) out.push(`${i+1}番目「${st[i].note||st[i].role}」が、ひとつ前の段階（EP${a+1}）より前の EP${b+1} にあります`); }
+  return out;
+}
+function threadSpan(t){const ps=(t.steps||[]).map(s=>epPos(s.ep)).filter(p=>p>=0); return ps.length?[Math.min(...ps),Math.max(...ps)]:[1e9,1e9];}
+function sortedThreads(){return [...threads].sort((a,b)=>threadSpan(a)[0]-threadSpan(b)[0]||(a.order||0)-(b.order||0));}
+const EXAMPLE_THREAD={title:"アルブレヒトの登場",kind:"段階",memo:"中盤以降の縦軸メモ 1章「登場の段階」より",steps:[
+  {ep:"e04",role:"張る",note:"予告のワンカット（イレーネとともに知らせを聞く）"},{ep:"e10",role:"段階",note:"頭目の証言で組織名「異端審問庁」"},
+  {ep:"e11",role:"段階",note:"術師がイレーネと団長の名を口にする"},{ep:"e12",role:"段階",note:"増援として現れ、ギアと邂逅"},
+  {ep:"e15",role:"段階",note:"過去編：病院を包囲した騎士団の長として名前だけ"},{ep:"e19",role:"段階",note:"遺跡の宿命刻の回収に関わっていた影"}]};
+function mgThreads(host){
+  const list=sortedThreads();
+  if(!list.find(t=>t.id===thSel)) thSel=list[0]?.id||null;
+  const t=threads.find(x=>x.id===thSel);
+  const N=eps.length;
+  const cols=`minmax(120px,190px) repeat(${N},22px)`;
+  const canExample=!threads.length&&EXAMPLE_THREAD.steps.every(s=>epPos(s.ep)>=0);
+  host.innerHTML=`<div class="card">
+    <h2 class="sec">伏線と段階 <span class="btnrow" style="margin:0"><button class="btn sm primary" id="th-add">＋ 新しい伏線</button>${canExample?`<button class="btn sm" id="th-ex">例：アルブレヒトの登場を入れる</button>`:""}</span></h2>
+    <div class="hint">○＝張る、・＝段階、●＝回収。エピソードを並べ替えて順序が逆になったり、回収が抜けたりすると ⚠ が付きます。</div>
+    ${list.length?`<div class="tl-wrap"><div class="tl" style="grid-template-columns:${cols}">
+      <div class="tl-h tl-name">伏線</div>${eps.map((e,i)=>`<button class="tl-h" data-tlep="${esc(e.id)}" title="EP${i+1} ${esc(e.title)}">${i+1}</button>`).join("")}
+      ${list.map(th=>{const [a,b]=threadSpan(th); const iss=checkThread(th); const at=new Map(); (th.steps||[]).forEach(s=>{const p=epPos(s.ep); if(p>=0){ const prev=at.get(p); at.set(p,prev==="回収"?"回収":s.role==="回収"?"回収":prev||s.role);} });
+        return `<button class="tl-name tl-row ${th.id===thSel?"cur":""}" data-th="${esc(th.id)}">${iss.length?`<span class="warn-i" title="${esc(iss.join("／"))}">⚠</span>`:""}${esc(th.title||"（無題）")}</button>`+
+          eps.map((e,i)=>{const r=at.get(i); const inSpan=i>=a&&i<=b; return `<span class="tl-c ${inSpan?"span":""} ${i===a?"first":""} ${i===b?"last":""} ${th.id===thSel?"cur":""}" title="EP${i+1}${r?"："+r:""}">${r?`<i class="mk ${r==="張る"?"open":r==="回収"?"done":"mid"}"></i>`:""}</span>`;}).join("");}).join("")}
+    </div></div>`:`<div class="empty">まだ伏線がありません。「＋ 新しい伏線」から登録できます。</div>`}
+  </div>
+  ${t?threadEditorHTML(t):""}`;
+  $("#th-add").onclick=async()=>{ const order=Math.max(0,...threads.map(x=>x.order||0))+10;
+    thSel=await addDoc("f",{title:"新しい伏線",kind:"伏線",memo:"",steps:[{ep:selId&&epPos(selId)>=0?selId:(eps[0]||{}).id||"",role:"張る",note:""}],order}); render(); };
+  if($("#th-ex")) $("#th-ex").onclick=async()=>{ thSel=await addDoc("f",{...structuredClone(EXAMPLE_THREAD),order:10}); render(); };
+  host.querySelectorAll("[data-th]").forEach(b=>b.onclick=()=>{thSel=b.dataset.th; try{localStorage.setItem("kozo.th",thSel)}catch(e){} render();});
+  host.querySelectorAll("[data-tlep]").forEach(b=>b.onclick=()=>gotoEp(b.dataset.tlep));
+  if(t) wireThreadEditor(t);
+}
+function threadEditorHTML(t){
+  const iss=checkThread(t);
+  return `<div class="card">
+    <div class="edhead"><input class="titlein" id="th-title" value="${esc(t.title)}" aria-label="伏線の名前" style="flex:1 1 240px">
+      <div class="btnrow" style="margin:0"><label class="f" style="margin:0">種類<select id="th-kind">${TH_KINDS.map(k=>`<option ${k===t.kind?"selected":""}>${k}</option>`).join("")}</select></label><button class="btn sm danger" id="th-del">削除</button></div></div>
+    ${iss.length?`<div class="issues">${iss.map(s=>`<div>⚠ ${esc(s)}</div>`).join("")}</div>`:`<div class="okline">✓ 順序と回収に問題はありません</div>`}
+    <div class="steps">${(t.steps||[]).map((s,i)=>`<div class="step">
+      <span class="sn">${i+1}</span>
+      <select data-sep="${i}" aria-label="エピソード">${epOptions(s.ep,"（エピソードを選ぶ）")}${s.ep&&epPos(s.ep)<0?`<option value="${esc(s.ep)}" selected>（削除されたEP）</option>`:""}</select>
+      <select data-srole="${i}" aria-label="役割">${TH_ROLES.map(r=>`<option ${r===s.role?"selected":""}>${r}</option>`).join("")}</select>
+      <input data-snote="${i}" value="${esc(s.note)}" placeholder="この段階で見せること" aria-label="内容">
+      <span class="sbtn"><button class="iconbtn" data-sup="${i}" aria-label="上へ" ${i===0?"disabled":""}>↑</button><button class="iconbtn" data-sdown="${i}" aria-label="下へ" ${i===t.steps.length-1?"disabled":""}>↓</button><button class="iconbtn" data-sdel="${i}" aria-label="この段階を削除">×</button></span>
+    </div>`).join("")}</div>
+    <button class="btn sm" id="th-step" style="margin-top:8px">＋ 段階を追加</button>
+    <label class="f block" style="margin-top:12px">メモ<textarea id="th-memo" rows="${rowsFor(t.memo,2)}">${esc(t.memo)}</textarea></label>
+  </div>`;
+}
+function wireThreadEditor(t){
+  const id="f:"+t.id;
+  $("#th-title").onchange=ev=>{edit(id,o=>o.title=ev.target.value); render();};
+  $("#th-kind").onchange=ev=>{edit(id,o=>o.kind=ev.target.value); render();};
+  $("#th-memo").oninput=ev=>edit(id,o=>o.memo=ev.target.value);
+  document.querySelectorAll("[data-sep]").forEach(el=>el.onchange=ev=>{edit(id,o=>o.steps[+el.dataset.sep].ep=ev.target.value); render();});
+  document.querySelectorAll("[data-srole]").forEach(el=>el.onchange=ev=>{edit(id,o=>o.steps[+el.dataset.srole].role=ev.target.value); render();});
+  document.querySelectorAll("[data-snote]").forEach(el=>el.oninput=ev=>edit(id,o=>o.steps[+el.dataset.snote].note=ev.target.value));
+  const mv=(a,b)=>{edit(id,o=>{const x=o.steps[a];o.steps[a]=o.steps[b];o.steps[b]=x}); render();};
+  document.querySelectorAll("[data-sup]").forEach(el=>el.onclick=()=>mv(+el.dataset.sup,+el.dataset.sup-1));
+  document.querySelectorAll("[data-sdown]").forEach(el=>el.onclick=()=>mv(+el.dataset.sdown,+el.dataset.sdown+1));
+  document.querySelectorAll("[data-sdel]").forEach(el=>el.onclick=()=>{edit(id,o=>o.steps.splice(+el.dataset.sdel,1)); render();});
+  $("#th-step").onclick=()=>{edit(id,o=>{o.steps=o.steps||[]; const last=o.steps[o.steps.length-1]; o.steps.push({ep:last?last.ep:"",role:"段階",note:""});}); render(); const ins=document.querySelectorAll("[data-snote]"); ins[ins.length-1]?.focus();};
+  $("#th-del").onclick=async ev=>{ if(pendingDelete!=="th"){pendingDelete="th"; ev.target.textContent="もう一度押すと削除"; return;} pendingDelete=null; await removeDoc(id); thSel=null; render(); };
+}
+
+/* 3. 宿命刻の回収表 */
+const FATES=["ゼナが保持","ゼナが吸収","ギアが保持","味方が保持","盟主が保管","騎士団が回収","敵が保持","未定"];
+const ZENA=f=>f==="ゼナが保持"||f==="ゼナが吸収";
+function zenaAt(p){return orbs.filter(o=>ZENA(o.fate)&&(o.collectEp||o.appearEp)&&epPos(o.collectEp||o.appearEp)>=0&&epPos(o.collectEp||o.appearEp)<=p);}
+function guessOrbs(){
+  const filled=[];
+  for(const o of orbs){
+    if(o.letter==="A"&&/ゼナ/.test(o.holder||"")&&!o.appearEp&&eps[0]){ edit("o:"+o.id,x=>{x.appearEp=eps[0].id; if(!x.fate) x.fate="ゼナが保持";}); filled.push("A"); continue; }
+    if(o.appearEp||o.collectEp) continue;
+    const e=eps.find(e=>{const s=String(e.orb||""); if(/^候補|ハズレ/.test(s)) return false; const m=s.match(/(?:^|：|★)\s*([A-Z])(?=[\s　]|[^\x00-\x7F])/); return m&&m[1]===o.letter;});
+    if(!e) continue;
+    const s=String(e.orb||""); const fate=/ゼナ[^）)]*(吸収|乗っ取り)/.test(s)?"ゼナが吸収":/（ギア）|\(ギア\)/.test(s)?"ギアが保持":"";
+    edit("o:"+o.id,x=>{x.appearEp=e.id; if(fate==="ゼナが吸収") x.collectEp=e.id; if(fate&&!x.fate) x.fate=fate;}); filled.push(o.letter);
+  }
+  return filled;
+}
+function mgOrbs(host){
+  if(!orbs.length){ host.innerHTML=`<div class="notice">宿命刻の表がまだありません。「設定」タブの「宿命刻（A〜Z）」で作るか、設定データを取り込んでください。</div>`; return; }
+  const assigned=orbs.filter(o=>o.holder&&o.holder.trim()).length, placed=orbs.filter(o=>o.appearEp).length;
+  if(orbAt==null||orbAt>=eps.length) orbAt=eps.length-1;
+  const counts=eps.map((e,i)=>zenaAt(i).length); const max=Math.max(1,...counts);
+  const r=ranges(); const now=zenaAt(orbAt); const at=eps[orbAt];
+  host.innerHTML=`<div class="card">
+    <h2 class="sec">ゼナが持っている刻の数 <span class="hint" style="letter-spacing:0">割り当て済み ${assigned}／26・登場EP決定 ${placed}／26</span></h2>
+    <div class="zbars" role="img" aria-label="エピソードごとのゼナの刻の数">${counts.map((c,i)=>`<button class="zb ${i===orbAt?"cur":""}" data-zat="${i}" title="EP${i+1}：${c}刻"><i style="height:${Math.round(c/max*100)}%"></i><span>${i+1}</span></button>`).join("")}</div>
+    <div class="zat">${at?`<b>EP${orbAt+1}「${esc(at.title)}」</b>（Web ${rng(r[at.id])}）の時点で、ゼナは <b class="mono">${now.length}</b> 刻：${now.map(o=>`<span class="chip orb real">${esc(o.letter)} ${esc(String(o.name||"").split(/[ →（(]/)[0])}</span>`).join(" ")||"—"}`:""}</div>
+    <div class="hint">「回収EP」（なければ「登場EP」）の時点で、行き先が「ゼナが保持／ゼナが吸収」の刻を数えています。棒を押すとその時点の内訳が出ます。</div>
+  </div>
+  <div class="card">
+    <h2 class="sec">回収表 <button class="btn sm" id="og-guess">エピソードの宿命刻欄から推定して埋める</button></h2>
+    <div class="hint" id="og-msg">空欄だけを埋めます。入っている値は変えません。</div>
+    <div class="tablewrap" style="margin-block:10px 0"><table class="orbtable cl"><thead><tr><th>刻</th><th>名称</th><th>保持者</th><th>登場EP</th><th>回収EP</th><th>行き先</th></tr></thead><tbody>
+    ${orbs.map(o=>{const a=epPos(o.appearEp), c=epPos(o.collectEp); const bad=a>=0&&c>=0&&c<a;
+      return `<tr class="${o.holder&&o.holder.trim()?"has":""}"><td class="n">${esc(o.letter)}</td><td>${esc(o.name)}</td><td>${esc(o.holder)}</td>
+      <td><select data-oe="appearEp" data-ol="${esc(o.id)}" aria-label="${esc(o.letter)}の登場EP">${epOptions(o.appearEp,"—")}</select></td>
+      <td><select data-oe="collectEp" data-ol="${esc(o.id)}" aria-label="${esc(o.letter)}の回収EP">${epOptions(o.collectEp,"—")}</select>${bad?`<div class="bad-t">⚠ 登場より前</div>`:""}</td>
+      <td><select data-oe="fate" data-ol="${esc(o.id)}" aria-label="${esc(o.letter)}の行き先"><option value="">—</option>${FATES.map(f=>`<option ${f===o.fate?"selected":""}>${f}</option>`).join("")}</select></td></tr>`;}).join("")}
+    </tbody></table></div>
+  </div>`;
+  host.querySelectorAll("[data-zat]").forEach(b=>b.onclick=()=>{orbAt=+b.dataset.zat; render();});
+  host.querySelectorAll("[data-oe]").forEach(el=>el.onchange=ev=>{edit("o:"+el.dataset.ol,o=>o[el.dataset.oe]=ev.target.value); render();});
+  $("#og-guess").onclick=()=>{const f=guessOrbs(); render(); const m=$("#og-msg"); if(m) m.textContent=f.length?`${f.join("・")} を埋めました。内容を確かめてください。`:"推定できる空欄はありませんでした。";};
+}
+
+/* 4. 連載：公開ブロックと書き溜め */
+const WSTAT=["未着手","執筆中","推敲","予約","公開済"];
+const planOf=()=>({need:4,pace:1,per:3000,...(meta.plan||{})});
+function webOf(e){const n=count(e); const w=(e.web||[]).slice(0,n); while(w.length<n) w.push({st:"未着手",n:0}); return w;}
+function blocksOf(){const out=[]; eps.forEach((e,i)=>{ if(i===0||!e.joinPrev) out.push([]); out[out.length-1].push(e); }); return out;}
+function mgSerial(host){
+  const P=planOf(), r=ranges(), bl=blocksOf();
+  const all=eps.flatMap(e=>webOf(e)); const total=all.length;
+  const done=all.filter(w=>WSTAT.indexOf(w.st)>=2).length, pub=all.filter(w=>w.st==="公開済").length, chars_=all.reduce((s,w)=>s+(Number(w.n)||0),0);
+  const pre=bl.slice(0,P.need).flat().flatMap(e=>webOf(e)); const preDone=pre.filter(w=>WSTAT.indexOf(w.st)>=2).length;
+  const left=total-done; const weeks=P.pace>0?Math.ceil(left/P.pace):null;
+  const eta=weeks!=null?new Date(Date.now()+weeks*7*864e5):null;
+  const unknown=eps.filter(e=>!count(e)).length;
+  host.innerHTML=`<div class="card">
+    <h2 class="sec">連載の見通し</h2>
+    <div class="kpis">
+      <div><span>公開ブロック</span><b class="mono">${bl.length}</b></div>
+      <div><span>書き上がり（推敲以降）</span><b class="mono">${done}<small>／${total}話</small></b></div>
+      <div><span>公開済み</span><b class="mono">${pub}<small>話</small></b></div>
+      <div><span>記録した字数</span><b class="mono">${chars_.toLocaleString()}<small>字</small></b></div>
+    </div>
+    <div class="plan2">
+      <div><b>開始前の書き溜め</b>（ブロック1〜${P.need}、Web ${pre.length}話）<br>${pre.length&&preDone>=pre.length?`<span class="okline">✓ 達成しています</span>`:`あと <b class="mono">${pre.length-preDone}</b>話（約 ${((pre.length-preDone)*P.per).toLocaleString()}字）`}
+        <div class="meter"><i style="width:${pre.length?Math.round(preDone/pre.length*100):0}%"></i></div></div>
+      <div><b>今の構成を書き終えるまで</b><br>${weeks!=null?`残り ${left}話 ÷ 週${P.pace}話 ＝ 約 <b class="mono">${weeks}</b>週（${eta.getFullYear()}年${eta.getMonth()+1}月ごろ）`:"—"}${unknown?`<br><span class="hint">Web話数が未定のエピソード（${unknown}本）は数えていません</span>`:""}</div>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <label class="f">開始前に書き溜めるブロック数<input type="number" min="0" max="${bl.length}" id="pl-need" value="${P.need}"></label>
+      <label class="f">書くペース（週に何話）<input type="number" min="0.5" step="0.5" id="pl-pace" value="${P.pace}"></label>
+      <label class="f">1話の字数の目安<input type="number" min="500" step="100" id="pl-per" value="${P.per}"></label>
+    </div>
+  </div>
+  <div class="card">
+    <h2 class="sec">公開ブロック</h2>
+    <div class="hint">各話の四角を押すと、状態が「未着手→執筆中→推敲→予約→公開済」の順に変わります。字数は「字数」を開いて入力します。</div>
+    ${bl.map((b,bi)=>{const ws=b.flatMap(e=>webOf(e)); const d=ws.filter(w=>WSTAT.indexOf(w.st)>=2).length; const x0=r[b[0].id], x1=r[b[b.length-1].id];
+      return `<div class="blk ${bi<P.need?"pre":""}"><div class="blkh"><b>ブロック ${bi+1}</b><span>Web ${x0.from!=null&&x1.to!=null?`${x0.from}〜${x1.to}`:"未定"}（${ws.length}話）</span><span>書き上がり ${d}／${ws.length}</span>${bi<P.need?`<span class="chip">開始前</span>`:""}</div>
+      ${b.map((e,k)=>{const x=r[e.id]; const w=webOf(e); const gi=epPos(e.id);
+        return `<div class="blkrow">
+          <button class="ep-l" data-goep2="${esc(e.id)}">EP${x.ep} ${esc(e.title)}</button>
+          <div class="wchips">${w.length?w.map((s,j)=>`<button class="wc st${WSTAT.indexOf(s.st)}" data-wc="${esc(e.id)}:${j}" title="${s.st}">${x.from!=null?x.from+j:j+1}</button>`).join(""):`<span class="hint">Web話数未定</span>`}</div>
+          ${w.length?`<details class="wn"><summary>字数</summary>${w.map((s,j)=>`<label>${x.from!=null?x.from+j:j+1}<input type="number" min="0" step="100" data-wn="${esc(e.id)}:${j}" value="${s.n||""}"></label>`).join("")}</details>`:""}
+          ${gi>0?`<button class="btn sm" data-join="${esc(e.id)}">${k===0?"前のブロックとつなぐ":"ここで区切る"}</button>`:""}
+        </div>`;}).join("")}</div>`;}).join("")}
+  </div>`;
+  const setPlan=(k,v)=>edit("__meta",o=>{o.plan={...planOf(),...(o.plan||{}),[k]:v};});
+  $("#pl-need").onchange=ev=>{setPlan("need",Math.max(0,Number(ev.target.value)||0)); render();};
+  $("#pl-pace").onchange=ev=>{setPlan("pace",Math.max(0.5,Number(ev.target.value)||1)); render();};
+  $("#pl-per").onchange=ev=>{setPlan("per",Math.max(500,Number(ev.target.value)||3000)); render();};
+  host.querySelectorAll("[data-wc]").forEach(b=>b.onclick=()=>{const [id,j]=b.dataset.wc.split(":"); edit(id,o=>{o.web=webOf(o); const s=o.web[+j]; s.st=WSTAT[(WSTAT.indexOf(s.st)+1)%WSTAT.length];}); render();});
+  host.querySelectorAll("[data-wn]").forEach(el=>el.onchange=ev=>{const [id,j]=el.dataset.wn.split(":"); edit(id,o=>{o.web=webOf(o); o.web[+j].n=Math.max(0,Number(ev.target.value)||0);}); render();});
+  host.querySelectorAll("[data-join]").forEach(b=>b.onclick=()=>{edit(b.dataset.join,o=>o.joinPrev=!o.joinPrev); render();});
+  host.querySelectorAll("[data-goep2]").forEach(b=>b.onclick=()=>gotoEp(b.dataset.goep2));
+}
+
+/* 5. 未決：散らばった要確認を集め、決めたら決定ログへ */
+function splitSegs(line){ // 「」（）の外にある ／ と / で区切る
+  const out=[]; let depth=0, cur="";
+  for(const ch of line){ if("「『（(【".includes(ch)) depth++; else if("」』）)】".includes(ch)) depth=Math.max(0,depth-1);
+    if((ch==="／"||ch==="/")&&depth===0){ out.push(cur); cur=""; } else cur+=ch; }
+  out.push(cur); return out.map(s=>s.trim());
+}
+function collectOpen(){
+  const items=[];
+  const add=(docId,field,text,kind)=>String(text||"").split("\n").forEach((line,li)=>splitSegs(line).forEach((seg,si)=>{ if(seg&&!/^~~.*~~$/.test(seg)) items.push({docId,field,li,si,text:seg,kind}); }));
+  eps.forEach(e=>add(e.id,"open",e.open,"ep"));
+  chars.forEach(c=>add("c:"+c.id,"memo",c.memo,"char"));
+  setts.forEach(s=>{ add("s:"+s.id,"memo",s.memo,"sett"); if(s.status==="未決") items.push({docId:"s:"+s.id,field:"status",text:`「${s.title}」の扱い`,kind:"sett"}); });
+  return items;
+}
+function removeSeg(text,li,si){
+  const lines=String(text||"").split("\n");
+  const segs=splitSegs(lines[li]||""); segs.splice(si,1);
+  lines[li]=segs.filter(Boolean).join("／");
+  return lines.filter(l=>l.trim()).join("\n");
+}
+const today=()=>{const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`};
+function mgOpen(host){
+  const all=collectOpen();
+  const items=all.filter(it=>(openFilter==="all"||it.kind===openFilter)&&(!openQ.trim()||(it.text+docLabel(it.docId)).includes(openQ.trim()))&&(!openStar||it.text.includes("★")));
+  host.innerHTML=`<div class="card">
+    <h2 class="sec">未決・確認事項 <span class="hint" style="letter-spacing:0">${items.length}／${all.length}件</span></h2>
+    <div class="hint">エピソードの「未決・確認事項」、キャラと設定の「未決・★案」を、1行ずつ（「／」の区切りも1件として）集めています。「決定」を押すと元の欄から外し、決定ログに日付つきで残します。</div>
+    <div class="ofil">
+      <div class="seg" role="group" aria-label="絞り込み">${[["all","すべて"],["ep","エピソード"],["char","キャラ"],["sett","設定"]].map(([k,l])=>`<button data-of="${k}" aria-pressed="${openFilter===k}">${l}</button>`).join("")}</div>
+      <input type="search" id="oq" placeholder="言葉で絞り込む" value="${esc(openQ)}">
+      <label class="ck"><input type="checkbox" id="ostar" ${openStar?"checked":""}> ★を含むものだけ</label>
+    </div>
+    <div class="olist">${items.map((it,i)=>`<div class="oi" data-oi="${all.indexOf(it)}">
+      <button class="loc" data-go="${esc(it.docId)}">${esc(docLabel(it.docId))}</button>
+      <div class="ot">${esc(it.text)}</div>
+      <button class="btn sm" data-dec="${all.indexOf(it)}">決定</button>
+      <div class="decf" hidden><input placeholder="決めた内容（空欄でも可）" aria-label="決めた内容"><button class="btn sm primary" data-decok="${all.indexOf(it)}">決定ログに記録</button><button class="btn sm" data-decno>やめる</button></div>
+    </div>`).join("")||`<div class="empty">該当する未決はありません。</div>`}</div>
+  </div>
+  <div class="card">
+    <h2 class="sec">決定ログ <span class="hint" style="letter-spacing:0">${decisions.length}件</span></h2>
+    <div class="dlog">${decisions.map(d=>`<div class="di"><span class="mono dd">${esc(d.date)}</span><div><b>${esc(d.item)}</b>${d.decision?` → ${esc(d.decision)}`:""}<div class="hint">${esc(d.srcLabel||"")}</div></div><button class="btn sm" data-undo="${esc(d.id)}">元に戻す</button></div>`).join("")||`<div class="empty">まだ記録はありません。</div>`}</div>
+  </div>`;
+  host.querySelectorAll("[data-of]").forEach(b=>b.onclick=()=>{openFilter=b.dataset.of; render();});
+  $("#oq").oninput=ev=>{openQ=ev.target.value; clearTimeout(window._oqT); window._oqT=setTimeout(()=>{render(); const q2=$("#oq"); if(q2){q2.focus(); q2.setSelectionRange(q2.value.length,q2.value.length);}},250);};
+  $("#ostar").onchange=ev=>{openStar=ev.target.checked; render();};
+  host.querySelectorAll("[data-go]").forEach(el=>el.onclick=()=>gotoDoc(el.dataset.go));
+  host.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>{const f=b.parentElement.querySelector(".decf"); f.hidden=false; b.hidden=true; f.querySelector("input").focus();});
+  host.querySelectorAll("[data-decno]").forEach(b=>b.onclick=()=>{const p=b.closest(".oi"); p.querySelector(".decf").hidden=true; p.querySelector("[data-dec]").hidden=false;});
+  host.querySelectorAll("[data-decok]").forEach(b=>b.onclick=async()=>{
+    const it=all[+b.dataset.decok]; const decision=b.parentElement.querySelector("input").value.trim();
+    if(it.field==="status") edit(it.docId,o=>o.status="決定");
+    else edit(it.docId,o=>o[it.field]=removeSeg(o[it.field],it.li,it.si));
+    await addDoc("d",{date:today(),item:it.text,decision,src:it.docId,srcField:it.field,srcLabel:docLabel(it.docId),createdAt:Date.now()});
+    setSave("決定ログに記録しました"); render();
+  });
+  host.querySelectorAll("[data-undo]").forEach(b=>b.onclick=async()=>{
+    const d=decisions.find(x=>x.id===b.dataset.undo); if(!d) return;
+    if(pendingDelete!=="undo"+d.id){ pendingDelete="undo"+d.id; b.textContent="元の欄に戻す？"; return; } pendingDelete=null;
+    const exists=d.src==="__meta"||recs.has(keyOf(d.src))&&!recs.get(keyOf(d.src)).deleted;
+    if(exists){ if(d.srcField==="status") edit(d.src,o=>o.status="未決"); else edit(d.src,o=>o[d.srcField]=[o[d.srcField],d.item].filter(x=>String(x||"").trim()).join("\n")); }
+    await removeDoc("d:"+d.id); setSave(exists?"元の欄に戻しました":"元の項目がないため、ログだけ消しました"); render();
+  });
+}
+
+/* 6. 登場表：キャラ×エピソード */
+function mgCast(host){
+  const N=eps.length; const rows=chars.map(c=>{const s=new Set(appearances(c).map(a=>epPos(a.e.id))); return {c,s};});
+  const gapCells=row=>{const ps=[...row.s].sort((a,b)=>a-b); const g=new Set(); for(let k=1;k<ps.length;k++) if(ps[k]-ps[k-1]-1>=castGap) for(let i=ps[k-1]+1;i<ps[k];i++) g.add(i); return g;};
+  let last=null;
+  host.innerHTML=`<div class="card">
+    <h2 class="sec">登場表 <label class="f" style="margin:0;flex-direction:row;align-items:center;gap:6px">空白の強調<select id="cg">${[3,5,8,12].map(n=>`<option value="${n}" ${n===castGap?"selected":""}>${n}話以上</option>`).join("")}</select></label></h2>
+    <div class="hint">エピソードの題・内容・提示するもの・各話の流れに、名前か呼び名（キャラクタータブで設定）が出る話を●で示します。登場の間が空いているところに色を付けています。</div>
+    <div class="tl-wrap"><div class="cast" style="grid-template-columns:minmax(110px,160px) repeat(${N},22px)">
+      <div class="tl-h tl-name">人物</div>${eps.map((e,i)=>`<button class="tl-h" data-tlep="${esc(e.id)}" title="EP${i+1} ${esc(e.title)}">${i+1}</button>`).join("")}
+      ${rows.map(row=>{const g=gapCells(row); let h="";
+        if(row.c.group!==last){ last=row.c.group; h+=`<div class="cg-h" style="grid-column:1/-1">${esc(last||"（区分なし）")}</div>`; }
+        return h+`<button class="tl-name tl-row" data-gc="${esc(row.c.id)}">${esc(row.c.name)}<span>${row.s.size}</span></button>`+
+          eps.map((e,i)=>`<button class="tl-c cc ${g.has(i)?"gap":""}" data-tlep="${esc(e.id)}" title="EP${i+1} ${esc(e.title)}${row.s.has(i)?"：登場":""}">${row.s.has(i)?`<i class="mk done"></i>`:""}</button>`).join("");}).join("")}
+    </div></div>
+  </div>`;
+  $("#cg").onchange=ev=>{castGap=+ev.target.value; render();};
+  host.querySelectorAll("[data-tlep]").forEach(b=>b.onclick=()=>gotoEp(b.dataset.tlep));
+  host.querySelectorAll("[data-gc]").forEach(b=>b.onclick=()=>gotoChar(b.dataset.gc));
+}
+
 /* ---------- 書き出し ---------- */
 function toMarkdown(){
   const r=ranges(); const L=[];
@@ -972,6 +1360,20 @@ function toMarkdown(){
       if(st.memo) L.push("**未決・★案**："+st.memo.replace(/\n/g,"／"),"");
     });
   }
+  if(threads.length){
+    L.push("---","","## 伏線と段階","");
+    sortedThreads().forEach(t=>{ const iss=checkThread(t);
+      L.push(`### ${t.title}（${t.kind||"伏線"}）`,"");
+      (t.steps||[]).forEach(s=>{const p=epPos(s.ep); L.push(`- ${p>=0?"EP"+(p+1):"（EP未設定）"}【${s.role}】${s.note||""}`);});
+      if(t.memo) L.push("",t.memo);
+      if(iss.length) L.push("",`**要確認**：${iss.join("／")}`);
+      L.push("");});
+  }
+  if(decisions.length){
+    L.push("---","","## 決定ログ","","| 日付 | 項目 | 決定 | 元の場所 |","|---|---|---|---|");
+    const c2=v=>String(v||"").replace(/\|/g,"／").replace(/\n/g," ");
+    decisions.forEach(d=>L.push(`| ${d.date} | ${c2(d.item)} | ${c2(d.decision)} | ${c2(d.srcLabel)} |`)); L.push("");
+  }
   if(orbs.length){
     const cell=v=>String(v||"").replace(/\|/g,"／").replace(/\n/g," ");
     L.push("---","","## 宿命刻（A〜Z）","","| 刻 | 名称 | 保持者・登場 | 状態 | 備考 |","|---|---|---|---|---|");
@@ -994,7 +1396,7 @@ $("#b-export").onclick=async()=>{
 };
 
 function saveView(){try{localStorage.setItem("kozo.view",view)}catch(e){}}
-["edit","table","chars","lore","policy"].forEach(v=>$("#v-"+v).onclick=()=>{view=v; saveView(); if(v!=="table"&&v!=="policy") window._mobileEditing=false; render();});
+["edit","table","chars","lore","policy","manage"].forEach(v=>$("#v-"+v).onclick=()=>{view=v; saveView(); if(v!=="table"&&v!=="policy") window._mobileEditing=false; render();});
 
 
 /* ---------- 同期とデータ（方針・編タブ） ---------- */
@@ -1052,7 +1454,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v9";
+const APP_VERSION="kozo-v10";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
