@@ -128,7 +128,8 @@ td.pres{max-width:28ch;color:var(--muted);font-size:12.5px}
 .arclist{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .arcedit{display:flex;gap:6px;align-items:center}
 .arcedit input{flex:1;min-width:0;border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:var(--bg)}
-.arcedit .cnt{font-family:var(--f-mono);font-size:11px;color:var(--muted);width:4.5em;text-align:right}
+.arcedit .cnt{font-family:var(--f-mono);font-size:11px;color:var(--muted);white-space:nowrap;text-align:right;min-width:10em}
+@media (max-width:560px){.arcedit{flex-wrap:wrap}.arcedit input{flex:1 1 100%}.arcedit .cnt{min-width:0;margin-right:auto}}
 
 /* ---- characters ---- */
 .crow{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;align-items:center;width:100%;text-align:left;border:0;background:transparent;padding:7px 12px;border-left:3px solid transparent}

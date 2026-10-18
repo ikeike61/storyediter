@@ -625,18 +625,45 @@ function renderPolicy(){
       <label class="f block">構成の方針（1行に1項目）<textarea id="m-policy" rows="10">${esc(meta.policy)}</textarea></label>
     </div>
     <div class="card">
-      <h2 class="sec">編 <button class="btn sm" id="b-addarc">＋ 編を追加</button></h2>
-      <div class="hint">名前を変えると一覧と構成表に反映されます。エピソードの所属は編集台の「編」で変えます。</div>
-      <div class="arclist">${(meta.arcs||[]).map((a,i)=>{const n=eps.filter(e=>e.arc===a.id); const w=n.reduce((s,e)=>s+count(e),0);
-        return `<div class="arcedit"><input data-ai="${i}" value="${esc(a.name)}" aria-label="編の名前"><span class="cnt">${n.length}話/${w}</span>
-        <button class="iconbtn" data-adel="${i}" aria-label="この編を削除" ${n.length?"disabled title='エピソードがある編は削除できません'":""}>×</button></div>`}).join("")}</div>
+      <h2 class="sec">シリーズ構成 <button class="btn sm" id="b-addarc">＋ 〇〇編を追加</button></h2>
+      <div class="hint">名前を変えると一覧と構成表に反映されます。↑↓で編を動かすと、所属するエピソードもまとめて移動し、Web話数が振り直されます。エピソードの所属は編集台の「編」で変えます。</div>
+      <div id="arcmsg" class="hint"></div>
+      <div class="arclist">${(meta.arcs||[]).map((a,i,all)=>{const n=eps.filter(e=>e.arc===a.id); const w=n.reduce((s,e)=>s+count(e),0); const x0=n[0]&&r[n[0].id], x1=n.length&&r[n[n.length-1].id];
+        return `<div class="arcedit"><input data-ai="${i}" value="${esc(a.name)}" aria-label="編の名前"><span class="cnt">${n.length?`EP${x0.ep}${x1.ep!==x0.ep?"–"+x1.ep:""}・`:""}${n.length}話/${w}</span>
+        <span class="sbtn"><button class="iconbtn" data-aup="${i}" aria-label="この編を上へ" ${i===0?"disabled":""}>↑</button><button class="iconbtn" data-adown="${i}" aria-label="この編を下へ" ${i===all.length-1?"disabled":""}>↓</button><button class="iconbtn" data-aadd="${i}" aria-label="この後に編を挿入" title="この後に編を挿入">＋</button>
+        <button class="iconbtn" data-adel="${i}" aria-label="この編を削除" ${n.length?"disabled title='エピソードがある編は削除できません'":""}>×</button></span></div>`}).join("")}</div>
     </div></div>`;
   const b=(s,k)=>$(s).oninput=ev=>{edit("__meta",o=>o[k]=ev.target.value); if(k==="title"||k==="tagline") renderHead();};
   b("#m-title","title"); b("#m-tag","tagline"); b("#m-log","logline"); b("#m-policy","policy");
   document.querySelectorAll("[data-ai]").forEach(el=>el.oninput=ev=>edit("__meta",o=>o.arcs[+el.dataset.ai].name=ev.target.value));
   document.querySelectorAll("[data-adel]").forEach(el=>el.onclick=()=>{edit("__meta",o=>o.arcs.splice(+el.dataset.adel,1)); render();});
-  $("#b-addarc").onclick=()=>{edit("__meta",o=>o.arcs.push({id:"a"+Date.now().toString(36),name:"新しい編"})); render();};
-  renderSyncCard();
+  const addArc=at=>{edit("__meta",o=>o.arcs.splice(at,0,{id:"a"+Date.now().toString(36),name:"〇〇編"})); render();
+    const ins=document.querySelectorAll("[data-ai]"); const t=ins[at]; if(t){t.focus(); t.setSelectionRange(0,2);} };
+  $("#b-addarc").onclick=()=>addArc((meta.arcs||[]).length);
+  document.querySelectorAll("[data-aadd]").forEach(el=>el.onclick=()=>addArc(+el.dataset.aadd+1));
+  document.querySelectorAll("[data-aup]").forEach(el=>el.onclick=()=>moveArc(+el.dataset.aup,-1));
+  document.querySelectorAll("[data-adown]").forEach(el=>el.onclick=()=>moveArc(+el.dataset.adown,1));
+}
+// 編を入れ替える。両方の編のエピソードがひと続きで隣り合っていれば、エピソードもまとめて入れ替える
+function moveArc(i,dir){
+  const arcs=meta.arcs||[], j=i+dir; if(j<0||j>=arcs.length) return;
+  const A=arcs[i], B=arcs[j];
+  const pos=id=>eps.map((e,k)=>e.arc===id?k:-1).filter(k=>k>=0);
+  const pa=pos(A.id), pb=pos(B.id);
+  const contiguous=p=>!p.length||p[p.length-1]-p[0]===p.length-1;
+  let moved=false, note="";
+  if(pa.length&&pb.length){
+    const [first,second]=dir<0?[pb,pa]:[pa,pb]; // first が前にある編
+    if(contiguous(pa)&&contiguous(pb)&&first[first.length-1]+1===second[0]){
+      const span=[...first,...second].map(k=>eps[k]); const orders=span.map(e=>e.order);
+      const reordered=[...second.map(k=>eps[k]),...first.map(k=>eps[k])];
+      reordered.forEach((e,k)=>{ if(e.order!==orders[k]) edit(e.id,o=>o.order=orders[k]); });
+      eps.sort((x,y)=>x.order-y.order); moved=true;
+    } else note="エピソードの並びが編ごとにまとまっていないため、編の順だけを入れ替えました（エピソードの並びはそのままです）。";
+  }
+  edit("__meta",o=>{const t=o.arcs[i]; o.arcs[i]=o.arcs[j]; o.arcs[j]=t;});
+  render();
+  const m=$("#arcmsg"); if(m) m.textContent=note||(moved?`「${A.name}」と「${B.name}」を、エピソードごと入れ替えました。`:"");
 }
 
 /* ---------- キャラクター ---------- */
@@ -870,7 +897,7 @@ function renderLore(){
   const modeBar=`<div class="seg lore-mode" role="group" aria-label="設定の表示"><button id="lm-items" aria-pressed="${loreMode==="items"}">項目</button><button id="lm-orbs" aria-pressed="${loreMode==="orbs"}">宿命刻（A〜Z）</button></div>`;
   if(loreMode==="orbs") return renderOrbs(modeBar);
   if(!setts.length){
-    m.innerHTML=`${modeBar}<div class="notice">まだ設定の項目がありません。<button class="btn primary" id="l-first">最初の項目を追加</button><br><span class="hint">設定資料から作った初期データは、「方針・シリーズ構成」タブの「取り込む」から読み込めます。</span></div>`;
+    m.innerHTML=`${modeBar}<div class="notice">まだ設定の項目がありません。<button class="btn primary" id="l-first">最初の項目を追加</button><br><span class="hint">設定資料から作った初期データは、「管理」タブの「同期とデータ」にある「取り込む」から読み込めます。</span></div>`;
     $("#l-first").onclick=()=>addLore(null); wireLoreMode(); return;
   }
   if(!setts.find(s=>s.id===loreSel)) loreSel=setts[0].id;
@@ -1000,7 +1027,7 @@ function renderOrbs(modeBar){
 /* ---------- 管理（表記・伏線・宿命刻の回収・連載・未決・登場表） ---------- */
 let mgMode="names", thSel=null, castGap=5, openFilter="all", openQ="", openStar=false, orbAt=null;
 try{mgMode=localStorage.getItem("kozo.mg")||"names"; thSel=localStorage.getItem("kozo.th");}catch(e){}
-const MG_MODES=[["names","表記チェック"],["threads","伏線"],["orbs","宿命刻の回収"],["serial","連載"],["open","未決"],["cast","登場表"],["history","履歴"],["links","リンク"]];
+const MG_MODES=[["names","表記チェック"],["threads","伏線"],["orbs","宿命刻の回収"],["serial","連載"],["open","未決"],["cast","登場表"],["history","履歴"],["data","同期とデータ"],["links","リンク"]];
 const epPos=id=>eps.findIndex(e=>e.id===id);
 function epOptions(sel,blank){return (blank!=null?`<option value="">${esc(blank)}</option>`:"")+eps.map((e,i)=>`<option value="${esc(e.id)}" ${e.id===sel?"selected":""}>EP${i+1} ${esc(e.title)}</option>`).join("")}
 function gotoEp(id){selId=id; view="edit"; window._mobileEditing=true; saveView(); try{localStorage.setItem("kozo.sel",id)}catch(e){} render(); window.scrollTo({top:0})}
@@ -1031,7 +1058,7 @@ function renderManage(){
   const m=$("#main");
   m.innerHTML=`<div class="seg mg-mode" role="group" aria-label="管理の表示">${MG_MODES.map(([k,l])=>`<button data-mg="${k}" aria-pressed="${mgMode===k}">${l}</button>`).join("")}</div><div id="mg"></div>`;
   document.querySelectorAll("[data-mg]").forEach(b=>b.onclick=()=>{mgMode=b.dataset.mg; try{localStorage.setItem("kozo.mg",mgMode)}catch(e){} render();});
-  ({names:mgNames,threads:mgThreads,orbs:mgOrbs,serial:mgSerial,open:mgOpen,cast:mgCast,history:mgHistory,links:mgLinks}[mgMode]||mgNames)($("#mg"));
+  ({names:mgNames,threads:mgThreads,orbs:mgOrbs,serial:mgSerial,open:mgOpen,cast:mgCast,history:mgHistory,data:h=>{h.innerHTML=""; renderSyncCard(h);},links:mgLinks}[mgMode]||mgNames)($("#mg"));
 }
 
 /* 1. 表記チェック：旧表記の残りを探して置き換える */
@@ -1553,14 +1580,14 @@ function saveView(){try{localStorage.setItem("kozo.view",view)}catch(e){}}
 ["edit","table","chars","lore","policy","manage"].forEach(v=>$("#v-"+v).onclick=()=>{view=v; saveView(); if(v!=="table"&&v!=="policy") window._mobileEditing=false; render();});
 
 
-/* ---------- 同期とデータ（方針・シリーズ構成タブ） ---------- */
-async function renderSyncCard(){
-  const host=document.querySelector(".policy"); if(!host) return;
+/* ---------- 同期とデータ（管理タブ） ---------- */
+async function renderSyncCard(host){
+  if(!host) return;
   const last=await kvGet("lastSync"); const n=await unsyncedCount();
   let quota=""; try{ const e=await navigator.storage.estimate(); quota=`端末の使用量 ${(e.usage/1048576).toFixed(1)}MB`; }catch(e){}
   let persisted=false; try{ persisted=await navigator.storage.persisted(); }catch(e){}
-  if(!document.querySelector(".policy")) return;
-  host.insertAdjacentHTML("beforeend",`<div class="card" style="grid-column:1/-1">
+  if(!host.isConnected) return;
+  host.insertAdjacentHTML("beforeend",`<div class="card">
     <h2 class="sec">同期とデータ</h2>
     <div class="syncgrid">
       <div><b>Googleドライブ</b>
@@ -1617,7 +1644,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v15";
+const APP_VERSION="kozo-v16";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
