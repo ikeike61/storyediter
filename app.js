@@ -403,7 +403,7 @@ function spineHTML(r){
       const inArc=eps.filter(x=>x.arc===e.arc); const a=r[inArc[0].id], b=r[inArc[inArc.length-1].id];
       html+=`<div class="arc">${esc(arcName(e.arc))}<span>EP${a.ep}${a.ep!==b.ep?"–"+b.ep:""}</span></div>`; }
     const x=r[e.id];
-    html+=`<button class="row" data-id="${e.id}" aria-current="${e.id===selId}">
+    html+=`<button class="row" data-id="${esc(e.id)}" aria-current="${e.id===selId}">
       <span class="no">EP${x.ep}</span><span class="t">${esc(e.title||"（無題）")}</span>
       <span class="w">Web ${rng(x)}</span><span class="st"><span class="chip s-${esc(e.status)}">${esc(e.status||"")}</span></span></button>`;
   });
@@ -439,7 +439,7 @@ function renderEdit(){
       <div id="confirm"></div>
       <input class="titlein" id="f-title" value="${esc(e.title)}" aria-label="エピソードの題">
       <div class="grid">
-        <label class="f">編<select id="f-arc">${(meta.arcs||[]).map(a=>`<option value="${a.id}" ${a.id===e.arc?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>
+        <label class="f">編<select id="f-arc">${(meta.arcs||[]).map(a=>`<option value="${esc(a.id)}" ${a.id===e.arc?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>
         <label class="f">状態<select id="f-status">${STATUSES.map(s=>`<option ${s===e.status?"selected":""}>${s}</option>`).join("")}</select></label>
         <label class="f">トーン<input id="f-tone" value="${esc(e.tone)}"></label>
         <label class="f">Web話数${hasParts?"（各話の数から自動）":""}<input id="f-wc" type="number" min="0" max="20" value="${count(e)}" ${hasParts?"disabled":""}></label>
@@ -537,7 +537,7 @@ function renderTable(){
   eps.forEach(e=>{
     if(e.arc!==last){last=e.arc; html+=`<tr class="arcrow"><td colspan="6">${esc(arcName(e.arc))}</td></tr>`;}
     const x=r[e.id];
-    html+=`<tr class="ep" data-id="${e.id}" tabindex="0"><td class="n">${x.ep}</td><td class="w">${rng(x)}</td>
+    html+=`<tr class="ep" data-id="${esc(e.id)}" tabindex="0"><td class="n">${x.ep}</td><td class="w">${rng(x)}</td>
       <td><span class="tt">${esc(e.title)}</span><span class="chip s-${esc(e.status)}">${esc(e.status)}</span> ${e.tone?`<span class="hint">${esc(e.tone)}</span>`:""}</td>
       <td class="sum">${esc(e.summary)}</td><td class="pres">${esc(e.presents)}</td>
       <td><span class="chip orb ${isReal(e.orb)?"real":""}">${esc(e.orb||"—")}</span></td></tr>`;
@@ -598,7 +598,7 @@ function relChars(r){ // 関係の相手（キャラクター欄にいる人物�
 }
 function relName(r){const byId=r.cid&&chars.find(c=>c.id===r.cid); return byId?byId.name:(r.name||"")}
 function relIconHTML(r){
-  return relChars(r).filter(c=>c.images&&c.images[0]).map(c=>`<button class="av rav" data-gochar="${c.id}" title="${esc(c.name)}を開く"><img src="${blob(c.images[0].id)}" alt="${esc(c.name)}"></button>`).join("");
+  return relChars(r).filter(c=>c.images&&c.images[0]).map(c=>`<button class="av rav" data-gochar="${esc(c.id)}" title="${esc(c.name)}を開く"><img src="${blob(c.images[0].id)}" alt="${esc(c.name)}"></button>`).join("");
 }
 function relsHTML(c){
   const rels=relsOf(c);
@@ -628,7 +628,7 @@ function charListHTML(){
     if(ql&&!hay.includes(ql)) return;
     if(c.group!==last){last=c.group; html+=`<div class="arc">${esc(c.group||"（区分なし）")}<span>${chars.filter(x=>x.group===c.group).length}人</span></div>`;}
     const img=c.images&&c.images[0];
-    html+=`<button class="crow" data-cid="${c.id}" aria-current="${c.id===charSel}">
+    html+=`<button class="crow" data-cid="${esc(c.id)}" aria-current="${c.id===charSel}">
       <span class="av">${img?`<img src="${blob(img.id)}" alt="" loading="lazy">`:`<span>${esc((c.name||"？").slice(0,1))}</span>`}</span>
       <span class="ct"><b>${esc(c.name||"（名前未定）")}</b><span>${esc(c.role)}</span></span></button>`;
   });
@@ -680,7 +680,7 @@ function renderChars(){
         </div>
       </div>
       <div class="block"><span class="hint">本文に名前が出るエピソード（${ap.length}）</span>
-        <div class="apps">${ap.length?ap.map(a=>`<button class="chip appchip" data-goep="${a.e.id}">EP${a.x.ep} ${esc(a.e.title)}</button>`).join(""):`<span class="hint">見つかりません</span>`}</div></div>
+        <div class="apps">${ap.length?ap.map(a=>`<button class="chip appchip" data-goep="${esc(a.e.id)}">EP${a.x.ep} ${esc(a.e.title)}</button>`).join(""):`<span class="hint">見つかりません</span>`}</div></div>
     </div>
 
     <div class="card">
@@ -783,7 +783,7 @@ function loreListHTML(){
     const hay=[s.title,s.summary,s.category,s.body,s.memo,s.keywords].join(" ");
     if(ql&&!hay.includes(ql)) return;
     if(s.category!==last){last=s.category; html+=`<div class="arc">${esc(s.category||"（区分なし）")}<span>${setts.filter(x=>x.category===s.category).length}件</span></div>`;}
-    html+=`<button class="srow" data-sid="${s.id}" aria-current="${s.id===loreSel}">
+    html+=`<button class="srow" data-sid="${esc(s.id)}" aria-current="${s.id===loreSel}">
       <span class="ct"><b>${esc(s.title||"（無題）")}</b><span>${esc(s.summary)}</span></span>
       ${s.status&&s.status!=="決定"?`<span class="chip ${s.status==="未決"?"s-未着手":"s-たたき台"}">${esc(s.status)}</span>`:""}</button>`;
   });
@@ -838,7 +838,7 @@ function renderLore(){
       </div>
       <label class="f block">関連語（読点区切り。本文に出てくるエピソードを探します）<input data-lk="keywords" value="${esc(s.keywords)}"></label>
       <div class="block"><span class="hint">関連語が出てくるエピソード（${ap.length}）</span>
-        <div class="apps">${ap.length?ap.map(a=>`<button class="chip appchip" data-goep="${a.e.id}">EP${a.x.ep} ${esc(a.e.title)}</button>`).join(""):`<span class="hint">${keywordsOf(s).length?"見つかりません":"関連語を入れると表示されます"}</span>`}</div></div>
+        <div class="apps">${ap.length?ap.map(a=>`<button class="chip appchip" data-goep="${esc(a.e.id)}">EP${a.x.ep} ${esc(a.e.title)}</button>`).join(""):`<span class="hint">${keywordsOf(s).length?"見つかりません":"関連語を入れると表示されます"}</span>`}</div></div>
     </div>
     <div class="card">
       <h2 class="sec">内容</h2>
@@ -918,10 +918,10 @@ function renderOrbs(modeBar){
     <div class="hint">26刻（A〜Z）。保持者や登場回が決まっている刻 <b class="mono">${filled}</b>／26。セルをそのまま書き換えられます。</div>
     <div class="tablewrap" style="margin-block:10px 0"><table class="orbtable"><thead><tr><th>刻</th><th>名称</th><th>保持者・登場</th><th>状態</th><th>備考</th></tr></thead><tbody>
     ${orbs.map(o=>`<tr class="${o.holder&&o.holder.trim()?"has":""}"><td class="n">${esc(o.letter)}</td>
-      <td><textarea data-ok="name" data-ol="${o.id}" rows="${rowsFor(o.name,1)}" aria-label="${esc(o.letter)}の名称">${esc(o.name)}</textarea></td>
-      <td><textarea data-ok="holder" data-ol="${o.id}" rows="${rowsFor(o.holder,1)}" aria-label="${esc(o.letter)}の保持者">${esc(o.holder)}</textarea></td>
-      <td><input data-ok="status" data-ol="${o.id}" list="ostat" value="${esc(o.status)}" aria-label="${esc(o.letter)}の状態"></td>
-      <td><textarea data-ok="note" data-ol="${o.id}" rows="${rowsFor(o.note,1)}" aria-label="${esc(o.letter)}の備考">${esc(o.note)}</textarea></td></tr>`).join("")}
+      <td><textarea data-ok="name" data-ol="${esc(o.id)}" rows="${rowsFor(o.name,1)}" aria-label="${esc(o.letter)}の名称">${esc(o.name)}</textarea></td>
+      <td><textarea data-ok="holder" data-ol="${esc(o.id)}" rows="${rowsFor(o.holder,1)}" aria-label="${esc(o.letter)}の保持者">${esc(o.holder)}</textarea></td>
+      <td><input data-ok="status" data-ol="${esc(o.id)}" list="ostat" value="${esc(o.status)}" aria-label="${esc(o.letter)}の状態"></td>
+      <td><textarea data-ok="note" data-ol="${esc(o.id)}" rows="${rowsFor(o.note,1)}" aria-label="${esc(o.letter)}の備考">${esc(o.note)}</textarea></td></tr>`).join("")}
     </tbody></table></div>
     <datalist id="ostat"><option value="決定"><option value="暫定"><option value="★提案"><option value="未割当"></datalist>
   </div>`;
@@ -1052,7 +1052,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v8";
+const APP_VERSION="kozo-v9";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
