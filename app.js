@@ -369,7 +369,8 @@ function planImport(text,out){
 
 /* ---------- 描画 ---------- */
 function renderHead(){
-  if(meta){ $("#h-title").textContent=meta.title||"宿命刻の姫君"; $("#h-tag").textContent=meta.tagline||""; }
+  if(meta){ const t=meta.title||"宿命刻の姫君", isLogo=t==="宿命刻の姫君"; // 作品名を変えたときは文字で表示する
+    $("#h-title").textContent=t; $("#h-title").hidden=isLogo; $("#h-logo").hidden=!isLogo; $("#h-tag").textContent=meta.tagline||""; document.title=t+" 構成台帳"; }
   ["edit","table","chars","lore","policy"].forEach(v=>$("#v-"+v).setAttribute("aria-pressed",String(view===v)));
   if(view==="lore"){ $("#stats").innerHTML=loaded?`<span>設定の項目 <b>${setts.length}</b></span><span>未決 <b>${setts.filter(s=>s.status==="未決").length}</b></span><span>宿命刻 <b>${orbs.filter(o=>o.holder&&o.holder.trim()).length}</b>／${orbs.length||26}</span>`:""; return; }
   if(view==="chars"){ $("#stats").innerHTML=loaded?`<span>キャラクター <b>${chars.length}</b></span><span>画像あり <b>${chars.filter(c=>c.images&&c.images.length).length}</b></span>`:""; return; }
@@ -1051,7 +1052,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v7";
+const APP_VERSION="kozo-v8";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{

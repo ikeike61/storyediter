@@ -221,3 +221,17 @@ body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset
 .warn{background:var(--bad-soft);color:var(--bad);border-radius:8px;padding:10px 12px;font-size:14px;line-height:1.6}
 .planlist.discard label{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .dbtns{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 6px}
+
+/* 作品ロゴ（ロゴ案を、アプリの配色に合わせて組んだもの）
+   大きな文字＝本文の色、金＝--gilt、英字＝--muted。--lg で全体の大きさを決める */
+.logo-h{margin:6px 0 2px}
+.logo{--lg:48px;display:inline-flex;flex-direction:column;align-items:center;gap:calc(var(--lg)*.13);font-family:var(--f-display);color:var(--ink);line-height:1;user-select:none}
+.lg-top{display:flex;align-items:center;gap:calc(var(--lg)*.16);color:var(--gilt);font-family:"Cormorant Garamond",var(--f-display);font-weight:600;font-size:max(10px,calc(var(--lg)*.22));letter-spacing:.5em;padding-left:.5em}
+.lg-top i{display:block;width:calc(var(--lg)*1.1);height:1px;background:currentColor;opacity:.85}
+.lg-main{display:flex;align-items:flex-end;gap:calc(var(--lg)*.04)}
+.lg-word{display:flex;flex-direction:column;align-items:stretch;gap:calc(var(--lg)*.05)}
+.lg-ruby{display:flex;justify-content:space-around;color:var(--gilt);font-weight:600;font-size:max(11px,calc(var(--lg)*.25));line-height:1}
+.lg-big{font-weight:800;font-size:var(--lg);letter-spacing:.04em;line-height:1}
+.lg-no{color:var(--gilt);font-weight:800;font-size:calc(var(--lg)*.57);line-height:1;padding-bottom:calc(var(--lg)*.07)}
+.lg-sub{color:var(--muted);font-family:"Cormorant Garamond",var(--f-display);font-weight:500;font-size:max(10px,calc(var(--lg)*.21));letter-spacing:.3em;padding-left:.32em;white-space:nowrap}
+@media (max-width:560px){.logo{--lg:38px}}

@@ -1,5 +1,5 @@
 /* オフラインでも開けるように、アプリ本体を端末に保存しておく */
-const VERSION = "kozo-v7";
+const VERSION = "kozo-v8";
 const SHELL = ["./", "./index.html", "./app.js", "./store.js", "./drive.js", "./config.js", "./styles.css",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png"];
 
