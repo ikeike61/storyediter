@@ -941,7 +941,7 @@ function renderOrbs(modeBar){
 /* ---------- 管理（表記・伏線・宿命刻の回収・連載・未決・登場表） ---------- */
 let mgMode="names", thSel=null, castGap=5, openFilter="all", openQ="", openStar=false, orbAt=null;
 try{mgMode=localStorage.getItem("kozo.mg")||"names"; thSel=localStorage.getItem("kozo.th");}catch(e){}
-const MG_MODES=[["names","表記チェック"],["threads","伏線"],["orbs","宿命刻の回収"],["serial","連載"],["open","未決"],["cast","登場表"]];
+const MG_MODES=[["names","表記チェック"],["threads","伏線"],["orbs","宿命刻の回収"],["serial","連載"],["open","未決"],["cast","登場表"],["links","リンク"]];
 const epPos=id=>eps.findIndex(e=>e.id===id);
 function epOptions(sel,blank){return (blank!=null?`<option value="">${esc(blank)}</option>`:"")+eps.map((e,i)=>`<option value="${esc(e.id)}" ${e.id===sel?"selected":""}>EP${i+1} ${esc(e.title)}</option>`).join("")}
 function gotoEp(id){selId=id; view="edit"; window._mobileEditing=true; saveView(); try{localStorage.setItem("kozo.sel",id)}catch(e){} render(); window.scrollTo({top:0})}
@@ -972,7 +972,7 @@ function renderManage(){
   const m=$("#main");
   m.innerHTML=`<div class="seg mg-mode" role="group" aria-label="管理の表示">${MG_MODES.map(([k,l])=>`<button data-mg="${k}" aria-pressed="${mgMode===k}">${l}</button>`).join("")}</div><div id="mg"></div>`;
   document.querySelectorAll("[data-mg]").forEach(b=>b.onclick=()=>{mgMode=b.dataset.mg; try{localStorage.setItem("kozo.mg",mgMode)}catch(e){} render();});
-  ({names:mgNames,threads:mgThreads,orbs:mgOrbs,serial:mgSerial,open:mgOpen,cast:mgCast}[mgMode]||mgNames)($("#mg"));
+  ({names:mgNames,threads:mgThreads,orbs:mgOrbs,serial:mgSerial,open:mgOpen,cast:mgCast,links:mgLinks}[mgMode]||mgNames)($("#mg"));
 }
 
 /* 1. 表記チェック：旧表記の残りを探して置き換える */
@@ -1296,6 +1296,35 @@ function mgOpen(host){
   });
 }
 
+/* 7. リンク：カクヨムの管理画面など、よく開くページ */
+const DEFAULT_LINKS=[{title:"カクヨム 作品の管理画面",url:"https://kakuyomu.jp/my/works/16818023213562242212",note:"エピソードの投稿・予約公開・作品情報の編集"}];
+const linksOf=()=>Array.isArray(meta.links)?meta.links:DEFAULT_LINKS;
+const safeUrl=u=>/^https?:\/\/[^\s]+$/i.test(String(u||"").trim())?String(u).trim():"";
+let linkEdit=false;
+function mgLinks(host){
+  const links=linksOf();
+  host.innerHTML=`<div class="card">
+    <h2 class="sec">リンク <button class="btn sm" id="lk-edit">${linkEdit?"編集を終える":"編集"}</button></h2>
+    <div class="hint">押すと新しいタブ（アプリから開いた場合はブラウザ）で開きます。</div>
+    <div class="links">${links.map((l,i)=>{const u=safeUrl(l.url); return linkEdit?`<div class="lkedit">
+        <input data-lt="${i}" value="${esc(l.title)}" placeholder="名前" aria-label="名前">
+        <input data-lu="${i}" value="${esc(l.url)}" placeholder="https://…" aria-label="アドレス" inputmode="url">
+        <input data-ln="${i}" value="${esc(l.note)}" placeholder="メモ" aria-label="メモ">
+        <span class="sbtn"><button class="iconbtn" data-lup="${i}" aria-label="上へ" ${i===0?"disabled":""}>↑</button><button class="iconbtn" data-ldel="${i}" aria-label="削除">×</button></span>
+        ${l.url&&!u?`<div class="bad-t">https:// から始まるアドレスを入れてください</div>`:""}</div>`
+      :`<a class="lk" ${u?`href="${esc(u)}" target="_blank" rel="noopener noreferrer"`:""}><b>${esc(l.title||u||"（名前なし）")}</b><span class="mono">${esc(u||"アドレスが未設定です")}</span>${l.note?`<span>${esc(l.note)}</span>`:""}<i aria-hidden="true">↗</i></a>`;}).join("")||`<div class="empty">リンクはまだありません。</div>`}</div>
+    ${linkEdit?`<button class="btn sm" id="lk-add" style="margin-top:8px">＋ リンクを追加</button>`:""}
+  </div>`;
+  const setLinks=mut=>edit("__meta",o=>{o.links=structuredClone(Array.isArray(o.links)?o.links:DEFAULT_LINKS); mut(o.links);});
+  $("#lk-edit").onclick=()=>{linkEdit=!linkEdit; render();};
+  host.querySelectorAll("[data-lt]").forEach(el=>el.oninput=ev=>setLinks(l=>l[+el.dataset.lt].title=ev.target.value));
+  host.querySelectorAll("[data-lu]").forEach(el=>el.onchange=ev=>{setLinks(l=>l[+el.dataset.lu].url=ev.target.value.trim()); render();});
+  host.querySelectorAll("[data-ln]").forEach(el=>el.oninput=ev=>setLinks(l=>l[+el.dataset.ln].note=ev.target.value));
+  host.querySelectorAll("[data-lup]").forEach(el=>el.onclick=()=>{const i=+el.dataset.lup; setLinks(l=>{const x=l[i];l[i]=l[i-1];l[i-1]=x}); render();});
+  host.querySelectorAll("[data-ldel]").forEach(el=>el.onclick=()=>{setLinks(l=>l.splice(+el.dataset.ldel,1)); render();});
+  if($("#lk-add")) $("#lk-add").onclick=()=>{setLinks(l=>l.push({title:"",url:"",note:""})); render(); const ins=host.querySelectorAll("[data-lt]"); ins[ins.length-1]?.focus();};
+}
+
 /* 6. 登場表：キャラ×エピソード */
 function mgCast(host){
   const N=eps.length; const rows=chars.map(c=>{const s=new Set(appearances(c).map(a=>epPos(a.e.id))); return {c,s};});
@@ -1462,7 +1491,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v11";
+const APP_VERSION="kozo-v12";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
