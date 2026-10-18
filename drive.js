@@ -82,9 +82,13 @@ const Drive = (() => {
     const r = await api(UPLOAD + "?uploadType=multipart&fields=id", { method: "POST", headers: { "Content-Type": m.type }, body: m.body });
     return (await r.json()).id;
   }
+  // 書き込んだ後の版の番号を返す（同時書き込みの確認に使う）
   async function updateJson(fileId, obj) {
-    await api(`${UPLOAD}/${fileId}?uploadType=media`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+    const r = await api(`${UPLOAD}/${fileId}?uploadType=media&fields=version`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+    try { return String((await r.json()).version); } catch (e) { return null; }
   }
+  // ファイルの版の番号（書き込むたびに増える）
+  async function getVersion(fileId) { const r = await api(`${API}/${fileId}?fields=version`); return String((await r.json()).version); }
   async function uploadImage(folderId, name, blob) {
     const m = multipart({ name, parents: [folderId] }, blob);
     const r = await api(UPLOAD + "?uploadType=multipart&fields=id", { method: "POST", headers: { "Content-Type": m.type }, body: m.body });
@@ -92,5 +96,5 @@ const Drive = (() => {
   }
   async function downloadBlob(fileId) { const r = await api(`${API}/${fileId}?alt=media`); return r.blob(); }
 
-  return { configured, preload, signIn, ensureFolder, findData, readJson, createJson, updateJson, uploadImage, downloadBlob, FOLDER };
+  return { configured, preload, signIn, ensureFolder, findData, readJson, createJson, updateJson, getVersion, uploadImage, downloadBlob, FOLDER };
 })();

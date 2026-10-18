@@ -177,10 +177,12 @@ function busy(text){const ov=$("#overlay"); if(text==null){ov.hidden=true; ov.in
 async function loadRemote(){
   const folder=await Drive.ensureFolder(await kvGet("folderId")); await kvSet("folderId",folder);
   const fileId=await Drive.findData(folder,await kvGet("dataFileId"));
+  // 版の番号を先に読む（中身より古い番号を持つ分には、書く前の確認でやり直しになるだけで安全）
+  const version=fileId&&Drive.getVersion?await Drive.getVersion(fileId):null;
   const remote=fileId?await Drive.readJson(fileId):{format:"kozo-drive",version:1,docs:{},images:{}};
   if(remote.format!=="kozo-drive") throw new Error("ドライブのデータの形式が違います");
   remote.docs=remote.docs||{}; remote.images=remote.images||{};
-  return {folder,fileId,remote};
+  return {folder,fileId,remote,version};
 }
 function usedImageIds(){const used=new Set(); for(const r of recs.values()) if(r&&!r.deleted&&r.data) (r.data.images||[]).forEach(im=>used.add(im.id)); return used;}
 // 使われていて端末にない画像を、ドライブから取ってくる
@@ -298,50 +300,80 @@ async function sync(){
     await Drive.signIn();              // ボタン操作の直後にログイン画面を出す
     flushAll();
     busy("ドライブと同期しています…");
-    const {folder,fileId,remote}=await loadRemote();
-    const rdocs=remote.docs||{}; const merged={...rdocs}; const toLocal=[]; const conflicts=[];
-    const keys=new Set([...recs.keys(),...Object.keys(rdocs)]); const hist=[];
+    const chosen=new Map();            // やり直しのときに、同じ競合を二度聞かない
     const pack=L=>({data:L.data,updatedAt:L.updatedAt||Date.now(),deleted:!!L.deleted});
-    for(const k of keys){
-      const L=recs.get(k), R=rdocs[k];
-      if(!L){ toLocal.push([k,{data:R.data,updatedAt:R.updatedAt,deleted:!!R.deleted,base:R.updatedAt,dirty:false}]); continue; }
-      if(!R){ merged[k]=pack(L); toLocal.push([k,{...L,base:L.updatedAt,dirty:false}]); continue; }
-      const Ru=R.updatedAt||0;
-      if(!L.dirty){ if(Ru>(L.base||0)){ if(L.data&&(stable(L.data)!==stable(R.data)||!!L.deleted!==!!R.deleted)) hist.push([k,"別の端末の内容に置き換わる前",L]); toLocal.push([k,{data:R.data,updatedAt:Ru,deleted:!!R.deleted,base:Ru,dirty:false}]); } continue; }
-      if(Ru<=(L.base||0)){ merged[k]=pack(L); hist.push([k,"同期で送った版",L]); toLocal.push([k,{...L,base:L.updatedAt,dirty:false}]); continue; }
-      if(stable(L.data)===stable(R.data)&&!!L.deleted===!!R.deleted){ toLocal.push([k,{...L,updatedAt:Ru,base:Ru,dirty:false}]); continue; }
-      conflicts.push({k,L,R});
-    }
-    if(conflicts.length){
-      busy(null);
-      const ch=await chooseConflicts(conflicts);
-      if(!ch){ busy(null); setSave("同期をやめました"); return; }
-      busy("ドライブと同期しています…");
-      conflicts.forEach((c,i)=>{
-        if(ch[i]==="L"){ const now=Date.now(); merged[c.k]={...pack(c.L),updatedAt:now}; hist.push([c.k,"競合：残さなかったドライブ側",c.R]); hist.push([c.k,"同期で送った版",c.L]); toLocal.push([c.k,{...c.L,updatedAt:now,base:now,dirty:false}]); }
-        else { hist.push([c.k,"競合：残さなかった端末側",c.L]); toLocal.push([c.k,{data:c.R.data,updatedAt:c.R.updatedAt,deleted:!!c.R.deleted,base:c.R.updatedAt,dirty:false}]); }
-      });
-    }
-    // 画像：この端末で追加した画像を上げる
-    const rimgs=remote.images||{};
-    const limgs=new Map(await Store.entries("images"));
-    let up=0;
-    for(const [id,v] of limgs){
-      if(!v) continue;
-      if(!v.driveId){ busy(`画像を送っています…（${++up}）`); v.driveId=await Drive.uploadImage(folder,id,v.blob); await Store.put("images",id,v); }
-      if(!rimgs[id]) rimgs[id]={driveId:v.driveId,type:v.blob.type||""};
-    }
-    const out={format:"kozo-drive",version:1,updatedAt:Date.now(),docs:merged,images:rimgs};
-    busy("台帳データを保存しています…");
-    if(fileId) await Drive.updateJson(fileId,out); else await kvSet("dataFileId",await Drive.createJson(folder,out));
-    // ドライブに書けてから、端末側を同期済みにする
-    for(const [k,kind,rec] of hist) histAdd(k,kind,rec);
-    await histChain;
-    toLocal.forEach(([,v])=>delete v.snap);
-    await Store.putMany("docs",toLocal);
-    for(const [k,v] of toLocal){
-      if(timers.has(k)) continue; // 同期中に入力されたものは、端末側の最新を優先
-      recs.set(k,v);
+    let rimgs, done=false;
+    for(let attempt=0; !done; attempt++){
+      if(attempt) busy(`ほかの端末の同期と重なったため、読み直しています…（${attempt}回目）`);
+      const {folder,fileId,remote,version}=await loadRemote();
+      const rdocs=remote.docs||{}; const merged={...rdocs}; const toLocal=[]; const conflicts=[];
+      const keys=new Set([...recs.keys(),...Object.keys(rdocs)]); const hist=[];
+      for(const k of keys){
+        const L=recs.get(k), R=rdocs[k];
+        if(!L){ toLocal.push([k,{data:R.data,updatedAt:R.updatedAt,deleted:!!R.deleted,base:R.updatedAt,dirty:false}]); continue; }
+        if(!R){ merged[k]=pack(L); toLocal.push([k,{...L,base:L.updatedAt,dirty:false}]); continue; }
+        const Ru=R.updatedAt||0;
+        if(!L.dirty){
+          if(Ru>(L.base||0)){ if(L.data&&(stable(L.data)!==stable(R.data)||!!L.deleted!==!!R.deleted)) hist.push([k,"別の端末の内容に置き換わる前",L]); toLocal.push([k,{data:R.data,updatedAt:Ru,deleted:!!R.deleted,base:Ru,dirty:false}]); }
+          else if(Ru<(L.base||0)&&L.data){ merged[k]=pack(L); } // 以前の同期で届かなかった変更を送り直す
+          continue;
+        }
+        if(Ru<=(L.base||0)){ merged[k]=pack(L); hist.push([k,"同期で送った版",L]); toLocal.push([k,{...L,base:L.updatedAt,dirty:false}]); continue; }
+        if(stable(L.data)===stable(R.data)&&!!L.deleted===!!R.deleted){ toLocal.push([k,{...L,updatedAt:Ru,base:Ru,dirty:false}]); continue; }
+        conflicts.push({k,L,R});
+      }
+      if(conflicts.length){
+        const ask=conflicts.filter(c=>{const m=chosen.get(c.k); return !m||m.ru!==c.R.updatedAt;});
+        if(ask.length){
+          busy(null);
+          const ch=await chooseConflicts(ask);
+          if(!ch){ busy(null); setSave("同期をやめました"); return; }
+          ask.forEach((c,i)=>chosen.set(c.k,{ru:c.R.updatedAt,pick:ch[i]}));
+          busy("ドライブと同期しています…");
+        }
+        conflicts.forEach(c=>{
+          if(chosen.get(c.k).pick==="L"){ const now=Date.now(); merged[c.k]={...pack(c.L),updatedAt:now}; hist.push([c.k,"競合：残さなかったドライブ側",c.R]); hist.push([c.k,"同期で送った版",c.L]); toLocal.push([c.k,{...c.L,updatedAt:now,base:now,dirty:false}]); }
+          else { hist.push([c.k,"競合：残さなかった端末側",c.L]); toLocal.push([c.k,{data:c.R.data,updatedAt:c.R.updatedAt,deleted:!!c.R.deleted,base:c.R.updatedAt,dirty:false}]); }
+        });
+      }
+      // 画像：この端末で追加した画像を上げる（上げ済みの画像は二度送らない）
+      rimgs=remote.images||{};
+      const limgs=new Map(await Store.entries("images"));
+      let up=0;
+      for(const [id,v] of limgs){
+        if(!v) continue;
+        if(!v.driveId){ busy(`画像を送っています…（${++up}）`); v.driveId=await Drive.uploadImage(folder,id,v.blob); await Store.put("images",id,v); }
+        if(!rimgs[id]) rimgs[id]={driveId:v.driveId,type:v.blob.type||""};
+      }
+      const out={format:"kozo-drive",version:1,updatedAt:Date.now(),docs:merged,images:rimgs};
+      busy("台帳データを保存しています…");
+      // 書く直前：読んだあとに、ほかの端末が書いていないか
+      if(fileId&&version!=null){
+        const now=await Drive.getVersion(fileId);
+        if(now!==version){ if(attempt<4) continue; throw new Error("ほかの端末の同期と重なりました。少し待ってから、もう一度「同期」を押してください"); }
+      }
+      let wrote;
+      if(fileId) wrote=await Drive.updateJson(fileId,out); else { const id=await Drive.createJson(folder,out); await kvSet("dataFileId",id); }
+      // 書いた後：ほぼ同時に書いた端末に、自分の変更が上書きされていないか
+      if(fileId&&wrote!=null){
+        await new Promise(r=>setTimeout(r,1500));
+        const after=await Drive.getVersion(fileId);
+        if(after!==wrote){
+          const re=await Drive.readJson(fileId); const rd=re.docs||{};
+          const lost=Object.keys(out.docs).filter(k=>(out.docs[k].updatedAt||0)>((rd[k]&&rd[k].updatedAt)||0));
+          if(lost.length){ if(attempt<4) continue; throw new Error("ほかの端末の同期と重なりました。少し待ってから、もう一度「同期」を押してください"); }
+        }
+      }
+      // ドライブに書けたことを確かめてから、端末側を同期済みにする
+      for(const [k,kind,rec] of hist) histAdd(k,kind,rec);
+      await histChain;
+      toLocal.forEach(([,v])=>delete v.snap);
+      await Store.putMany("docs",toLocal);
+      for(const [k,v] of toLocal){
+        if(timers.has(k)) continue; // 同期中に入力されたものは、端末側の最新を優先
+        recs.set(k,v);
+      }
+      done=true;
     }
     rebuild();
     await fetchMissingImages(rimgs);
@@ -1585,7 +1617,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v13";
+const APP_VERSION="kozo-v14";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
