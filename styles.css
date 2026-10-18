@@ -210,7 +210,7 @@ body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset
 .ricons .rav+.rav{margin-left:-14px}
 .rav{width:36px;height:36px;padding:0;cursor:pointer}
 .rname{border:1px solid var(--line);border-radius:6px;padding:7px 8px;background:var(--bg);font-weight:700;min-width:0;width:100%;font:inherit;font-weight:700}
-.rtext{border:1px solid var(--line);border-radius:6px;padding:7px 8px;background:var(--bg);resize:vertical;min-width:0;width:100%;font:inherit;line-height:1.6}
+.rtext{border:1px solid var(--line);border-radius:6px;padding:7px 8px;background:var(--bg);resize:none;overflow:hidden;min-width:0;width:100%;font:inherit;line-height:1.6}
 .rdel{min-width:36px}
 @media (max-width:560px){
   .rel{grid-template-columns:58px minmax(0,1fr) auto;grid-template-areas:"i n d" "t t t"}

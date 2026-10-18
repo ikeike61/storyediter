@@ -605,12 +605,17 @@ function relsHTML(c){
     <div class="rels">${rels.map((r,i)=>`<div class="rel" data-ri="${i}">
       <div class="ricons" id="ri-${i}">${relIconHTML(r)}</div>
       <input class="rname" data-rn="${i}" list="relnames" value="${esc(relName(r))}" placeholder="相手の名前" aria-label="相手の名前">
-      <textarea class="rtext" data-rt="${i}" rows="${Math.max(1,rowsFor(r.text,1)-1)}" placeholder="関係（自由記述）" aria-label="関係の内容">${esc(r.text)}</textarea>
+      <textarea class="rtext" data-rt="${i}" rows="1" placeholder="関係（自由記述）" aria-label="関係の内容">${esc(r.text)}</textarea>
       <button class="btn sm rdel" data-rdel="${i}" title="この関係を削除" aria-label="この関係を削除">×</button>
     </div>`).join("")||`<div class="empty">まだ関係はありません。</div>`}</div>
     <datalist id="relnames">${chars.filter(x=>x.id!==c.id).map(x=>`<option value="${esc(x.name)}">`).join("")}</datalist>
     <button class="btn sm" id="r-add" style="margin-top:8px">＋ 関係を追加</button></div>`;
 }
+// 関係の説明は、全文が見えるように高さを中身に合わせる
+function fitText(el){ if(!el.isConnected||!el.offsetWidth) return; el.style.height="auto"; el.style.height=(el.scrollHeight+2)+"px"; }
+let fitTimer=null;
+try{ document.fonts.ready.then(()=>document.querySelectorAll(".rtext").forEach(fitText)); }catch(e){}
+window.addEventListener("resize",()=>{ clearTimeout(fitTimer); fitTimer=setTimeout(()=>document.querySelectorAll(".rtext").forEach(fitText),100); });
 function editRels(id,mut){
   edit(id,o=>{ const rels=structuredClone(relsOf(o)); mut(rels); o.rels=rels; o.relations=relsText(rels); });
 }
@@ -723,7 +728,7 @@ function wireChars(c,id){
     editRels(id,rels=>{ rels[i].name=v.trim(); rels[i].cid=hit?hit.id:""; });
     const cur=chars.find(x=>x.id===c.id); $("#ri-"+i).innerHTML=relIconHTML(relsOf(cur)[i]); wireIcons();
   });
-  document.querySelectorAll("[data-rt]").forEach(el=>el.oninput=ev=>{const i=+el.dataset.rt; editRels(id,rels=>{rels[i].text=ev.target.value});});
+  document.querySelectorAll("[data-rt]").forEach(el=>{ fitText(el); el.oninput=ev=>{fitText(el); const i=+el.dataset.rt; editRels(id,rels=>{rels[i].text=ev.target.value});}; });
   document.querySelectorAll("[data-rdel]").forEach(el=>el.onclick=()=>{
     const i=+el.dataset.rdel;
     if(pendingDelete!=="rel"+i){ pendingDelete="rel"+i; el.textContent="削除する"; el.classList.add("danger"); return; }
@@ -1046,7 +1051,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v6";
+const APP_VERSION="kozo-v7";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
