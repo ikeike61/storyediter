@@ -354,3 +354,18 @@ button.tl-h{cursor:pointer}
 .lkedit input{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--bg);min-width:0;width:100%}
 .lkedit .bad-t{grid-column:1/-1}
 @media (max-width:640px){.lkedit{grid-template-columns:minmax(0,1fr) auto}.lkedit input{grid-column:1/2}.lkedit .sbtn{grid-row:1;grid-column:2}}
+
+/* 履歴 */
+.ofil select{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--bg);max-width:100%;min-width:0}
+.hlist{display:flex;flex-direction:column}
+.hi{border-top:1px dashed var(--line)}
+.hrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;width:100%;text-align:left;border:0;background:transparent;padding:8px 2px;font-size:13.5px}
+.hrow:hover,.hi.open .hrow{background:var(--bg)}
+.hbody{padding:4px 2px 10px}
+.hdf{margin-top:8px}
+.hdf>b{font-size:12.5px;color:var(--muted)}
+.dl{border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-top:4px;font-size:13px;line-height:1.6}
+.dl>div{display:grid;grid-template-columns:2.6em minmax(0,1fr);gap:6px;padding:2px 8px;font-size:11px;color:var(--muted)}
+.dl>div span{font-size:13px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+.dl .do{background:var(--bad-soft)}.dl .do span{color:var(--bad)}
+.dl .dn{background:var(--ok-soft)}.dl .dn span{color:var(--ok)}

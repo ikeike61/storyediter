@@ -1,9 +1,10 @@
 /* 端末内の保存（IndexedDB）
    docs   : キー "meta" / "e:<id>" / "c:<id>" → {data, updatedAt, base, dirty, deleted}
    images : キー 画像ID → {blob, driveId, name}
-   kv     : 設定や同期の状態 */
+   kv     : 設定や同期の状態
+   history: キー "<docキー>|<時刻>" → {key, ts, kind, data, deleted}（項目ごとに最新15件） */
 const Store = (() => {
-  const NAME = "kozo-pwa", VER = 1;
+  const NAME = "kozo-pwa", VER = 2; // 2：編集履歴（history）を追加
   let dbp = null;
   function open() {
     if (dbp) return dbp;
@@ -11,7 +12,7 @@ const Store = (() => {
       const r = indexedDB.open(NAME, VER);
       r.onupgradeneeded = () => {
         const d = r.result;
-        for (const s of ["docs", "images", "kv"]) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
+        for (const s of ["docs", "images", "kv", "history"]) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
       };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);

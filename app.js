@@ -56,8 +56,30 @@ function rebuild(){
 }
 function setSave(t,err){const s=$("#save");s.textContent=t;s.classList.toggle("err",!!err)}
 const timers=new Map();
+/* ---------- 履歴（この端末で記録。項目ごとに最新15件） ---------- */
+const HIST_MAX=15, HIST_GAP=10*60*1000;
+const histLast=new Map(); // docキー → 最後に記録した時刻
+let histChain=Promise.resolve();
+function histAdd(key,kind,rec){
+  if(!rec||rec.data==null) return histChain;
+  const snap={data:structuredClone(rec.data),deleted:!!rec.deleted,updatedAt:rec.updatedAt||0};
+  histChain=histChain.then(async()=>{
+    try{
+      const mine=(await Store.entries("history")).filter(([k])=>k.startsWith(key+"|")).sort((a,b)=>b[1].ts-a[1].ts);
+      // 直前の記録と同じ内容なら、種類だけ違っても重ねて残さない（競合は必ず残す）
+      if(mine[0]&&/^(編集前|同期で送った版|戻す前)$/.test(kind)&&stable(mine[0][1].data)===stable(snap.data)&&mine[0][1].deleted===snap.deleted){ histLast.set(key,Date.now()); return; }
+      const ts=Date.now()+Math.random(); // 同じ瞬間の記録が重ならないように
+      await Store.put("history",key+"|"+ts,{key,ts,kind,...snap});
+      histLast.set(key,Date.now());
+      for(const [k] of mine.slice(HIST_MAX-1)) await Store.del("history",k);
+    }catch(e){}
+  });
+  return histChain;
+}
 function touch(key,data,deleted){
   let r=recs.get(key);
+  // しばらく間をあけて編集を始めたときは、編集前の状態を履歴に残す
+  if(r&&r.data&&Date.now()-(histLast.get(key)||0)>HIST_GAP) histAdd(key,"編集前",r);
   if(!r) r={base:0,snap:null};                 // 新しく作った項目（破棄すると消える）
   else if(!r.dirty) r.snap={data:r.data,updatedAt:r.updatedAt,deleted:!!r.deleted}; // 同期済みの状態を控える
   r.data=data; r.updatedAt=Date.now(); r.dirty=true; r.deleted=!!deleted; recs.set(key,r);
@@ -222,6 +244,7 @@ async function revertKeys(keys){
   const puts=[], dels=[];
   for(const k of keys){
     const r=recs.get(k); if(!r) continue;
+    histAdd(k,"破棄した変更",r);
     let s;
     if("snap" in r) s=r.snap;
     else if(r.base){ const R=rdocs[k]; s=R?{data:R.data,updatedAt:R.updatedAt,deleted:!!R.deleted}:null; }
@@ -248,6 +271,7 @@ async function replaceWithDrive(){
     cancelTimers([...timers.keys()]);
     const puts=[], dels=[];
     for(const [k,r] of [...recs]){
+      if(r&&r.data&&(r.dirty||(rdocs[k]&&stable(rdocs[k].data)!==stable(r.data)))) histAdd(k,"ドライブの内容で置き換える前",r);
       if(rdocs[k]) continue;
       if(r&&r.dirty){ dels.push(k); recs.delete(k); }   // ドライブにない＝この端末で作っただけの項目
     }
@@ -276,15 +300,15 @@ async function sync(){
     busy("ドライブと同期しています…");
     const {folder,fileId,remote}=await loadRemote();
     const rdocs=remote.docs||{}; const merged={...rdocs}; const toLocal=[]; const conflicts=[];
-    const keys=new Set([...recs.keys(),...Object.keys(rdocs)]);
+    const keys=new Set([...recs.keys(),...Object.keys(rdocs)]); const hist=[];
     const pack=L=>({data:L.data,updatedAt:L.updatedAt||Date.now(),deleted:!!L.deleted});
     for(const k of keys){
       const L=recs.get(k), R=rdocs[k];
       if(!L){ toLocal.push([k,{data:R.data,updatedAt:R.updatedAt,deleted:!!R.deleted,base:R.updatedAt,dirty:false}]); continue; }
       if(!R){ merged[k]=pack(L); toLocal.push([k,{...L,base:L.updatedAt,dirty:false}]); continue; }
       const Ru=R.updatedAt||0;
-      if(!L.dirty){ if(Ru>(L.base||0)) toLocal.push([k,{data:R.data,updatedAt:Ru,deleted:!!R.deleted,base:Ru,dirty:false}]); continue; }
-      if(Ru<=(L.base||0)){ merged[k]=pack(L); toLocal.push([k,{...L,base:L.updatedAt,dirty:false}]); continue; }
+      if(!L.dirty){ if(Ru>(L.base||0)){ if(L.data&&(stable(L.data)!==stable(R.data)||!!L.deleted!==!!R.deleted)) hist.push([k,"別の端末の内容に置き換わる前",L]); toLocal.push([k,{data:R.data,updatedAt:Ru,deleted:!!R.deleted,base:Ru,dirty:false}]); } continue; }
+      if(Ru<=(L.base||0)){ merged[k]=pack(L); hist.push([k,"同期で送った版",L]); toLocal.push([k,{...L,base:L.updatedAt,dirty:false}]); continue; }
       if(stable(L.data)===stable(R.data)&&!!L.deleted===!!R.deleted){ toLocal.push([k,{...L,updatedAt:Ru,base:Ru,dirty:false}]); continue; }
       conflicts.push({k,L,R});
     }
@@ -294,8 +318,8 @@ async function sync(){
       if(!ch){ busy(null); setSave("同期をやめました"); return; }
       busy("ドライブと同期しています…");
       conflicts.forEach((c,i)=>{
-        if(ch[i]==="L"){ const now=Date.now(); merged[c.k]={...pack(c.L),updatedAt:now}; toLocal.push([c.k,{...c.L,updatedAt:now,base:now,dirty:false}]); }
-        else toLocal.push([c.k,{data:c.R.data,updatedAt:c.R.updatedAt,deleted:!!c.R.deleted,base:c.R.updatedAt,dirty:false}]);
+        if(ch[i]==="L"){ const now=Date.now(); merged[c.k]={...pack(c.L),updatedAt:now}; hist.push([c.k,"競合：残さなかったドライブ側",c.R]); hist.push([c.k,"同期で送った版",c.L]); toLocal.push([c.k,{...c.L,updatedAt:now,base:now,dirty:false}]); }
+        else { hist.push([c.k,"競合：残さなかった端末側",c.L]); toLocal.push([c.k,{data:c.R.data,updatedAt:c.R.updatedAt,deleted:!!c.R.deleted,base:c.R.updatedAt,dirty:false}]); }
       });
     }
     // 画像：この端末で追加した画像を上げる
@@ -311,6 +335,8 @@ async function sync(){
     busy("台帳データを保存しています…");
     if(fileId) await Drive.updateJson(fileId,out); else await kvSet("dataFileId",await Drive.createJson(folder,out));
     // ドライブに書けてから、端末側を同期済みにする
+    for(const [k,kind,rec] of hist) histAdd(k,kind,rec);
+    await histChain;
     toLocal.forEach(([,v])=>delete v.snap);
     await Store.putMany("docs",toLocal);
     for(const [k,v] of toLocal){
@@ -359,6 +385,7 @@ function planImport(text,out){
   if(!todo.length&&!imgs.length) return;
   $("#i-apply").onclick=async()=>{
     $("#i-apply").disabled=true;
+    todo.forEach(i=>{const cur=recs.get(i.key); if(cur&&cur.data&&!cur.deleted) histAdd(i.key,"取り込みで上書きされる前",cur);});
     const pairs=todo.map(i=>{const cur=recs.get(i.key);
       const snap=!cur?null:cur.dirty?("snap" in cur?cur.snap:undefined):{data:cur.data,updatedAt:cur.updatedAt,deleted:!!cur.deleted};
       const r={data:i.data,updatedAt:i.iu,base:(cur||{}).base||0,dirty:true,deleted:false}; if(snap!==undefined) r.snap=snap;
@@ -941,7 +968,7 @@ function renderOrbs(modeBar){
 /* ---------- 管理（表記・伏線・宿命刻の回収・連載・未決・登場表） ---------- */
 let mgMode="names", thSel=null, castGap=5, openFilter="all", openQ="", openStar=false, orbAt=null;
 try{mgMode=localStorage.getItem("kozo.mg")||"names"; thSel=localStorage.getItem("kozo.th");}catch(e){}
-const MG_MODES=[["names","表記チェック"],["threads","伏線"],["orbs","宿命刻の回収"],["serial","連載"],["open","未決"],["cast","登場表"],["links","リンク"]];
+const MG_MODES=[["names","表記チェック"],["threads","伏線"],["orbs","宿命刻の回収"],["serial","連載"],["open","未決"],["cast","登場表"],["history","履歴"],["links","リンク"]];
 const epPos=id=>eps.findIndex(e=>e.id===id);
 function epOptions(sel,blank){return (blank!=null?`<option value="">${esc(blank)}</option>`:"")+eps.map((e,i)=>`<option value="${esc(e.id)}" ${e.id===sel?"selected":""}>EP${i+1} ${esc(e.title)}</option>`).join("")}
 function gotoEp(id){selId=id; view="edit"; window._mobileEditing=true; saveView(); try{localStorage.setItem("kozo.sel",id)}catch(e){} render(); window.scrollTo({top:0})}
@@ -972,7 +999,7 @@ function renderManage(){
   const m=$("#main");
   m.innerHTML=`<div class="seg mg-mode" role="group" aria-label="管理の表示">${MG_MODES.map(([k,l])=>`<button data-mg="${k}" aria-pressed="${mgMode===k}">${l}</button>`).join("")}</div><div id="mg"></div>`;
   document.querySelectorAll("[data-mg]").forEach(b=>b.onclick=()=>{mgMode=b.dataset.mg; try{localStorage.setItem("kozo.mg",mgMode)}catch(e){} render();});
-  ({names:mgNames,threads:mgThreads,orbs:mgOrbs,serial:mgSerial,open:mgOpen,cast:mgCast,links:mgLinks}[mgMode]||mgNames)($("#mg"));
+  ({names:mgNames,threads:mgThreads,orbs:mgOrbs,serial:mgSerial,open:mgOpen,cast:mgCast,history:mgHistory,links:mgLinks}[mgMode]||mgNames)($("#mg"));
 }
 
 /* 1. 表記チェック：旧表記の残りを探して置き換える */
@@ -1325,6 +1352,72 @@ function mgLinks(host){
   if($("#lk-add")) $("#lk-add").onclick=()=>{setLinks(l=>l.push({title:"",url:"",note:""})); render(); const ins=host.querySelectorAll("[data-lt]"); ins[ins.length-1]?.focus();};
 }
 
+/* 8. 履歴：競合で残さなかった内容や、上書き・編集の前の状態を見返して戻す */
+let histFilter="all", histKey="", histOpen=null;
+const HIST_GROUPS=[["all","すべて"],["conflict","競合"],["sync","同期"],["edit","編集"],["discard","破棄・置き換え"]];
+const histGroup=k=>k.startsWith("競合")?"conflict":/同期|別の端末/.test(k)?"sync":/編集|戻す/.test(k)?"edit":"discard";
+function fmtVal(v){
+  if(v==null) return "";
+  if(typeof v!=="object") return String(v);
+  if(Array.isArray(v)) return v.map(x=>x&&typeof x==="object"?Object.entries(x).filter(([k,y])=>!SKIP_KEYS.has(k)&&k!=="id"&&typeof y==="string"&&y).map(([,y])=>y).join(" ／ "):String(x)).filter(Boolean).join("\n");
+  return Object.entries(v).filter(([k])=>!SKIP_KEYS.has(k)).map(([k,y])=>`${FIELD_LABEL[k]||k}：${fmtVal(y)}`).join("\n");
+}
+function lineDiff(a,b){ // 行単位の差分（LCS）
+  const A=String(a).split("\n"), B=String(b).split("\n"); const n=A.length, m=B.length;
+  if(n*m>40000) return [...A.map(t=>["-",t]),...B.map(t=>["+",t])];
+  const L=Array.from({length:n+1},()=>new Uint16Array(m+1));
+  for(let i=n-1;i>=0;i--) for(let j=m-1;j>=0;j--) L[i][j]=A[i]===B[j]?L[i+1][j+1]+1:Math.max(L[i+1][j],L[i][j+1]);
+  const out=[]; let i=0,j=0;
+  while(i<n&&j<m){ if(A[i]===B[j]){out.push(["=",A[i]]);i++;j++;} else if(L[i+1][j]>=L[i][j+1]) out.push(["-",A[i++]]); else out.push(["+",B[j++]]); }
+  while(i<n) out.push(["-",A[i++]]); while(j<m) out.push(["+",B[j++]]);
+  return out;
+}
+function histDiff(old,cur,oldDel,curDel){
+  if(curDel===undefined) return `<div class="hint">この項目は今はありません（削除されています）。戻すと復活します。</div>`;
+  const keys=[...new Set([...Object.keys(old||{}),...Object.keys(cur||{})])].filter(k=>!["order","updatedAt","web","joinPrev"].includes(k)&&!(k==="relations"&&("rels" in (old||{})||"rels" in (cur||{}))));
+  const ch=keys.filter(k=>stable(old?.[k])!==stable(cur?.[k]));
+  let html="";
+  if(!!oldDel!==!!curDel) html+=`<div class="hint">${oldDel?"この版では削除されていました":"今は削除されています"}</div>`;
+  if(!ch.length) return html+`<div class="okline">今の内容と同じです</div>`;
+  return html+ch.map(k=>{const d=lineDiff(fmtVal(old?.[k]),fmtVal(cur?.[k]));
+    return `<div class="hdf"><b>${esc(FIELD_LABEL[k]||k)}</b><div class="dl">${d.filter((x,ix)=>x[0]!=="="||d[ix-1]?.[0]!=="="||d[ix+1]?.[0]!=="=").map(([t,l])=>`<div class="d${t==="-"?"o":t==="+"?"n":"s"}">${t==="-"?"当時":t==="+"?"今":"　"}<span>${esc(l)||"&nbsp;"}</span></div>`).join("")}</div></div>`;}).join("");
+}
+async function mgHistory(host){
+  host.innerHTML=`<div class="card"><div class="hint">履歴を読み込んでいます…</div></div>`;
+  let list=[]; try{ list=(await Store.entries("history")).map(([id,h])=>({id,...h})).sort((a,b)=>b.ts-a.ts); }catch(e){}
+  if(mgMode!=="history"||view!=="manage") return;
+  const keysWith=[...new Set(list.map(h=>h.key))];
+  const shown=list.filter(h=>(histFilter==="all"||histGroup(h.kind)===histFilter)&&(!histKey||h.key===histKey));
+  const conflicts=list.filter(h=>h.kind.startsWith("競合")).length;
+  const fmtT=ts=>{const d=new Date(ts); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;};
+  host.innerHTML=`<div class="card">
+    <h2 class="sec">履歴 <span class="hint" style="letter-spacing:0">${list.length}件${conflicts?`・競合 ${conflicts}件`:""}</span></h2>
+    <div class="hint">この端末で記録した、編集前・同期・競合・破棄の前の状態です。項目ごとに最新${HIST_MAX}件を残します。押すと今の内容と見比べられ、「この版に戻す」で戻せます。</div>
+    <div class="ofil">
+      <div class="seg" role="group" aria-label="種類で絞り込む">${HIST_GROUPS.map(([k,l])=>`<button data-hf="${k}" aria-pressed="${histFilter===k}">${l}</button>`).join("")}</div>
+      <select id="hk" aria-label="項目で絞り込む"><option value="">すべての項目</option>${keysWith.map(k=>`<option value="${esc(k)}" ${k===histKey?"selected":""}>${esc(labelKey(k,(recs.get(k)||list.find(h=>h.key===k)||{}).data))}</option>`).join("")}</select>
+    </div>
+    <div class="hlist">${shown.slice(0,200).map(h=>{const cur=recs.get(h.key); const open=histOpen===h.id;
+      return `<div class="hi ${open?"open":""}">
+        <button class="hrow" data-ho="${esc(h.id)}" aria-expanded="${open}"><span class="mono dd">${fmtT(h.ts)}</span><span class="chip ${histGroup(h.kind)==="conflict"?"s-未着手":""}">${esc(h.kind)}</span><b>${esc(labelKey(h.key,(recs.get(h.key)&&recs.get(h.key).data)||h.data))}</b></button>
+        ${open?`<div class="hbody">${histDiff(h.data,cur&&!cur.deleted?cur.data:null,h.deleted,cur&&!cur.deleted?false:undefined)}
+          <div class="btnrow"><button class="btn sm primary" data-hr="${esc(h.id)}">この版に戻す</button><button class="btn sm" data-hk="${esc(h.key)}">この項目の履歴だけ見る</button></div></div>`:""}
+      </div>`;}).join("")||`<div class="empty">${list.length?"該当する履歴はありません。":"まだ履歴はありません。編集や同期をすると、ここに記録されます。"}</div>`}</div>
+  </div>`;
+  host.querySelectorAll("[data-hf]").forEach(b=>b.onclick=()=>{histFilter=b.dataset.hf; render();});
+  $("#hk").onchange=ev=>{histKey=ev.target.value; render();};
+  host.querySelectorAll("[data-ho]").forEach(b=>b.onclick=()=>{histOpen=histOpen===b.dataset.ho?null:b.dataset.ho; render();});
+  host.querySelectorAll("[data-hk]").forEach(b=>b.onclick=()=>{histKey=b.dataset.hk; histFilter="all"; render();});
+  host.querySelectorAll("[data-hr]").forEach(b=>b.onclick=async()=>{
+    const h=list.find(x=>x.id===b.dataset.hr); if(!h) return;
+    if(pendingDelete!=="hr"+h.id){ pendingDelete="hr"+h.id; b.textContent="もう一度押すと戻す"; return; } pendingDelete=null;
+    const cur=recs.get(h.key);
+    if(cur&&cur.data) await histAdd(h.key,"戻す前",cur);
+    touch(h.key,structuredClone(h.data),!!h.deleted); await persist(h.key); rebuild();
+    setSave(`${labelKey(h.key,h.data)}を ${fmtT(h.ts)} の版に戻しました（同期でほかの端末にも反映されます）`); histOpen=null; render();
+  });
+}
+
 /* 6. 登場表：キャラ×エピソード */
 function mgCast(host){
   const N=eps.length; const rows=chars.map(c=>{const s=new Set(appearances(c).map(a=>epPos(a.e.id))); return {c,s};});
@@ -1486,12 +1579,13 @@ $("#b-discard").onclick=()=>openDiscard();
   try{
     for(const [k,v] of await Store.entries("docs")) recs.set(k,v);
     for(const [k,v] of await Store.entries("images")) if(v&&v.blob) urlCache.set(k,URL.createObjectURL(v.blob));
+    for(const [,h] of await Store.entries("history")) if(h&&h.key) histLast.set(h.key,Math.max(histLast.get(h.key)||0,h.ts));
   }catch(e){ setSave("端末の保存領域を開けませんでした",true); }
   rebuild(); loaded=true; render(); updateSyncBadge();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v12";
+const APP_VERSION="kozo-v13";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
