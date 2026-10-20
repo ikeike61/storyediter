@@ -387,3 +387,13 @@ header.top .tools{grid-area:tabs}
   .actbtns .ic{width:18px;height:18px}
   .status{max-width:9em;font-size:11px}
 }
+
+/* 待ち時間の表示（三点リーダーと足踏み） */
+.dialog.busy{display:flex;align-items:center;justify-content:center;gap:12px 18px;flex-wrap:wrap;width:auto;max-width:min(560px,100%)}
+.busy-t{margin:0;font-size:15px;font-weight:500;flex:0 1 auto;min-width:0;text-align:center}
+.dots i{font-style:normal;visibility:hidden}
+.dots[data-n="1"] i:nth-child(-n+1),.dots[data-n="2"] i:nth-child(-n+2),.dots[data-n="3"] i{visibility:visible}
+.walkers{display:flex;align-items:flex-end;gap:6px}
+.walker img{display:none;width:80px;height:130px;image-rendering:pixelated;image-rendering:crisp-edges}
+.walker[data-f="0"] img:nth-child(1),.walker[data-f="1"] img:nth-child(2),.walker[data-f="2"] img:nth-child(3){display:block}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

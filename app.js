@@ -172,7 +172,28 @@ function chooseConflicts(list){
     $("#cf-cancel").onclick=()=>res(null);
   });
 }
-function busy(text){const ov=$("#overlay"); if(text==null){ov.hidden=true; ov.innerHTML=""; return;} ov.hidden=false; ov.innerHTML=`<div class="dialog"><p>${esc(text)}</p></div>`;}
+/* 待ち時間の表示：三点リーダーと、足踏みする3人（左からギア・ゼナ・ティル） */
+const WALKERS=["gia","zena","til"], WALK_ORDER=[0,1,2,1], STEP_MS=350; // 4拍で1周：点0〜3個／コマ1→2→3→2
+let walkTimer=null, walkStep=0;
+const reduceMotion=()=>!!(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches);
+WALKERS.forEach(n=>[1,2,3].forEach(k=>{const im=new Image(); im.src=`sprites/${n}_walk_${k}.png`;})); // 先に読んでおく
+function paintWalk(){
+  const ov=$("#overlay"); const still=reduceMotion(); const st=still?3:walkStep;
+  ov.querySelectorAll(".dots").forEach(d=>d.dataset.n=st);
+  ov.querySelectorAll(".walker").forEach(w=>w.dataset.f=still?1:WALK_ORDER[st]);
+}
+function busy(text){
+  const ov=$("#overlay");
+  if(text==null){ ov.hidden=true; ov.innerHTML=""; clearInterval(walkTimer); walkTimer=null; return; }
+  ov.hidden=false;
+  const dots=`<span class="dots" data-n="0"><i>.</i><i>.</i><i>.</i></span>`;
+  const t=String(text), at=t.indexOf("…");
+  const shown=at>=0?esc(t.slice(0,at))+dots+esc(t.slice(at+1)):esc(t)+dots;
+  ov.innerHTML=`<div class="dialog busy" role="status"><p class="busy-t"><span class="sr">${esc(t)}</span><span aria-hidden="true">${shown}</span></p>
+    <div class="walkers" aria-hidden="true">${WALKERS.map(n=>`<span class="walker" data-f="0">${[1,2,3].map(k=>`<img src="sprites/${n}_walk_${k}.png" alt="" width="40" height="65">`).join("")}</span>`).join("")}</div></div>`;
+  if(!walkTimer&&!reduceMotion()){ walkStep=0; walkTimer=setInterval(()=>{walkStep=(walkStep+1)%4; paintWalk();},STEP_MS); }
+  paintWalk();
+}
 
 async function loadRemote(){
   const folder=await Drive.ensureFolder(await kvGet("folderId")); await kvSet("folderId",folder);
@@ -299,7 +320,7 @@ async function sync(){
   try{
     await Drive.signIn();              // ボタン操作の直後にログイン画面を出す
     flushAll();
-    busy("ドライブと同期しています…");
+    busy("同期中…");
     const chosen=new Map();            // やり直しのときに、同じ競合を二度聞かない
     const pack=L=>({data:L.data,updatedAt:L.updatedAt||Date.now(),deleted:!!L.deleted});
     let rimgs, done=false;
@@ -329,7 +350,7 @@ async function sync(){
           const ch=await chooseConflicts(ask);
           if(!ch){ busy(null); setSave("同期をやめました"); return; }
           ask.forEach((c,i)=>chosen.set(c.k,{ru:c.R.updatedAt,pick:ch[i]}));
-          busy("ドライブと同期しています…");
+          busy("同期中…");
         }
         conflicts.forEach(c=>{
           if(chosen.get(c.k).pick==="L"){ const now=Date.now(); merged[c.k]={...pack(c.L),updatedAt:now}; hist.push([c.k,"競合：残さなかったドライブ側",c.R]); hist.push([c.k,"同期で送った版",c.L]); toLocal.push([c.k,{...c.L,updatedAt:now,base:now,dirty:false}]); }
@@ -1644,7 +1665,7 @@ $("#b-discard").onclick=()=>openDiscard();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v16";
+const APP_VERSION="kozo-v17";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
