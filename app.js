@@ -462,7 +462,8 @@ function planImport(text,out){
 function renderHead(){
   if(meta){ const t=meta.title||"宿命刻の姫君", isLogo=t==="宿命刻の姫君"; // 作品名を変えたときは文字で表示する
     $("#h-title").textContent=t; $("#h-title").hidden=isLogo; $("#h-logo").hidden=!isLogo; $("#h-tag").textContent=meta.tagline||""; document.title=t+" 構成台帳"; }
-  ["edit","table","chars","lore","policy","manage"].forEach(v=>$("#v-"+v).setAttribute("aria-pressed",String(view===v)));
+  ["edit","table","chars","lore","policy","drafts","manage"].forEach(v=>$("#v-"+v).setAttribute("aria-pressed",String(view===v||(v==="drafts"&&view==="draft"&&draftFrom==="list"))));
+  if(view==="drafts"){ const rs=loaded?draftRows():[]; $("#stats").innerHTML=loaded?`<span>下書き <b>${rs.length}</b>話</span><span>合計 <b>${rs.reduce((s,x)=>s+x.chars,0).toLocaleString()}</b>文字</span>`:""; return; }
   if(view==="manage"){ $("#stats").innerHTML=loaded?mgStats():""; return; }
   if(view==="draft"){ $("#stats").innerHTML=""; return; }
   if(view==="lore"){ $("#stats").innerHTML=loaded?`<span>設定の項目 <b>${setts.length}</b></span><span>未決 <b>${setts.filter(s=>s.status==="未決").length}</b></span><span>宿命刻 <b>${orbs.filter(o=>o.holder&&o.holder.trim()).length}</b>／${orbs.length||26}</span>`:""; return; }
@@ -486,6 +487,7 @@ function render(){
   if(view==="policy") return renderPolicy();
   if(view==="manage") return renderManage();
   if(view==="draft") return renderDraft();
+  if(view==="drafts") return renderDraftList();
   renderEdit();
 }
 
@@ -601,7 +603,7 @@ function wireEdit(e){
     pendingDelete=null; edit(id,o=>{o.parts.splice(i,1); if(!o.parts.length) o.webCount=1;}); render();});
   $("#b-addpart").onclick=()=>{edit(id,o=>{o.parts=o.parts||[];o.parts.push({title:"新しい話",beats:""})}); render();
     const ts=document.querySelectorAll("[data-pi]"); ts[ts.length-1]?.select();};
-  document.querySelectorAll("[data-draft]").forEach(b=>b.onclick=()=>openDraft(id,+b.dataset.draft));
+  document.querySelectorAll("[data-draft]").forEach(b=>b.onclick=()=>{draftFrom="ep"; openDraft(id,+b.dataset.draft);});
   $("#b-up").onclick=()=>moveEp(id,-1); $("#b-down").onclick=()=>moveEp(id,1);
   $("#b-addafter").onclick=()=>addEp(id);
   $("#b-back").onclick=()=>{window._mobileEditing=false; render();};
@@ -1619,7 +1621,7 @@ function renderDraft(){
   const ment=mentionsIn([body,part?part.beats:"",part?part.note:""].join(" "));
   m.innerHTML=`<div class="draft ${draftSide?"":"noside"}">
     <div class="dr-bar">
-      <button class="btn sm" id="dr-back">← EP${x.ep}</button>
+      <button class="btn sm" id="dr-back">← ${draftFrom==="list"?"下書き一覧":`EP${x.ep}`}</button>
       <span class="dr-where"><b>${no!=null?`第${no}話`:`EP${x.ep}の${i+1}話目`}</b><span>EP${x.ep}「${esc(e.title)}」</span></span>
       <span class="dr-tools">
         <span class="seg" role="group" aria-label="表示"><button id="dr-edit" aria-pressed="${draftMode==="edit"}">執筆</button><button id="dr-prev" aria-pressed="${draftMode==="preview"}">プレビュー</button></span>
@@ -1645,7 +1647,7 @@ function renderDraft(){
         <div class="card">${mentionChipsHTML(ment,"出てくる人物・用語")||`<div class="hint">本文やプロットに人物・用語が出てくると、ここに並びます。</div>`}</div>
       </aside>`:""}
     </div></div>`;
-  $("#dr-back").onclick=()=>{selId=e.id; view="edit"; window._mobileEditing=true; saveView(); render();};
+  $("#dr-back").onclick=()=>{ if(draftFrom==="list"){ view="drafts"; saveView(); render(); return; } selId=e.id; view="edit"; window._mobileEditing=true; saveView(); render();};
   $("#dr-edit").onclick=()=>{draftMode="edit"; render();};
   $("#dr-prev").onclick=()=>{draftMode="preview"; render();};
   if($("#dr-h")){ $("#dr-h").onclick=()=>{draftVertical=false; try{localStorage.setItem("kozo.dv","0")}catch(err){} render();}; $("#dr-v").onclick=()=>{draftVertical=true; try{localStorage.setItem("kozo.dv","1")}catch(err){} render();}; }
@@ -1673,6 +1675,39 @@ function renderDraft(){
     ta.focus(); ta.dispatchEvent(new Event("input")); };
   $("#dr-ruby").onclick=()=>wrap("|","《》","親文字",true);
   $("#dr-dot").onclick=()=>wrap("《《","》》","言葉",false);
+}
+
+/* ---------- 下書き一覧 ---------- */
+let dlSort="updated"; try{dlSort=localStorage.getItem("kozo.dls")||"updated";}catch(e){}
+let draftFrom="ep";
+const DL_SORTS=[["updated","更新日時（新しい順）"],["updated_asc","更新日時（古い順）"],["order","話の順"],["chars","文字数（多い順）"],["chars_asc","文字数（少ない順）"]];
+function draftRows(){
+  const r=ranges();
+  return drafts.filter(d=>String(d.body||"").trim()||String(d.title||"").trim()).map(d=>{
+    const id="w:"+d.id, rec=recs.get(id), w=draftWhere(id);
+    const x=w&&r[w.e.id]; const no=w&&x.from!=null?x.from+w.i:null;
+    const st=w?(webOf(w.e)[w.i]||{}).st:"";
+    return {d,id,w,no,ep:w?x.ep:null,epTitle:w?w.e.title:"",pos:w?epPos(w.e.id)*1000+w.i:1e9,updated:(rec&&rec.updatedAt)||0,chars:countChars(d.body),st,dirty:!!(rec&&rec.dirty)};
+  });
+}
+function renderDraftList(){
+  const m=$("#main"); const rows=draftRows();
+  const cmp={updated:(a,b)=>b.updated-a.updated,updated_asc:(a,b)=>a.updated-b.updated,order:(a,b)=>a.pos-b.pos,chars:(a,b)=>b.chars-a.chars,chars_asc:(a,b)=>a.chars-b.chars}[dlSort]||((a,b)=>b.updated-a.updated);
+  rows.sort(cmp);
+  const total=rows.reduce((s,x)=>s+x.chars,0);
+  const fmt=ts=>{ if(!ts) return "—"; const d=new Date(ts); return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
+  m.innerHTML=`<div class="card dlist">
+    <h2 class="sec">下書き一覧 <label class="f" style="margin:0;flex-direction:row;align-items:center;gap:6px">並び替え<select id="dl-sort">${DL_SORTS.map(([k,l])=>`<option value="${k}" ${k===dlSort?"selected":""}>${l}</option>`).join("")}</select></label></h2>
+    <div class="hint">${rows.length}話・合計 ${total.toLocaleString()}文字。押すとその話の執筆画面を開きます。新しく書くときは、エピソードの「本文の下書き」から始めます。</div>
+    ${rows.length?`<div class="dl-rows">${rows.map(x=>`<button class="dl-row" data-dl="${esc(x.id)}">
+        <span class="dl-no">${x.no!=null?`第${x.no}話`:x.w?`EP${x.ep}`:"行き先なし"}</span>
+        <span class="dl-main"><b>${esc(x.d.title||"（無題）")}</b><span class="hint">${x.w?`EP${x.ep}「${esc(x.epTitle)}」`:"元の話が削除されています"}</span>
+          <span class="dl-pre">${esc(plainOf(x.d.body).replace(/\s+/g," ").slice(0,90))}${plainOf(x.d.body).length>90?"…":""}</span></span>
+        <span class="dl-meta"><span class="mono"><b>${x.chars.toLocaleString()}</b>字</span>${x.st?`<span class="chip wst st${WSTAT.indexOf(x.st)}">${esc(x.st)}</span>`:""}<span class="mono hint">${fmt(x.updated)}${x.dirty?"・未同期":""}</span></span>
+      </button>`).join("")}</div>`:`<div class="empty">まだ下書きはありません。エピソードの「各話のプロット」にある「本文の下書き」から書き始められます。</div>`}
+  </div>`;
+  $("#dl-sort").onchange=ev=>{dlSort=ev.target.value; try{localStorage.setItem("kozo.dls",dlSort)}catch(e){} render();};
+  m.querySelectorAll("[data-dl]").forEach(b=>b.onclick=()=>{ const w=draftWhere(b.dataset.dl); if(w){ draftFrom="list"; openDraft(w.e.id,w.i); } });
 }
 
 /* ---------- 全体検索 ---------- */
@@ -1836,7 +1871,7 @@ $("#b-export").onclick=async()=>{
 };
 
 function saveView(){try{localStorage.setItem("kozo.view",view)}catch(e){}}
-["edit","table","chars","lore","policy","manage"].forEach(v=>$("#v-"+v).onclick=()=>{view=v; saveView(); if(v!=="table"&&v!=="policy") window._mobileEditing=false; render();});
+["edit","table","chars","lore","policy","drafts","manage"].forEach(v=>$("#v-"+v).onclick=()=>{view=v; saveView(); if(v!=="table"&&v!=="policy") window._mobileEditing=false; render();});
 
 
 /* ---------- 同期とデータ（管理タブ） ---------- */
@@ -1909,7 +1944,7 @@ $("#b-search").onclick=()=>openSearch();
   if(navigator.onLine&&Drive.configured()) Drive.preload().catch(()=>{});
 })();
 /* 新しい版が届いたら、保存を済ませてから自動で切り替える */
-const APP_VERSION="kozo-v18";
+const APP_VERSION="kozo-v19";
 if("serviceWorker" in navigator){
   const hadController=!!navigator.serviceWorker.controller; let reloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{
