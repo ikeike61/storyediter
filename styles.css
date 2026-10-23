@@ -397,3 +397,77 @@ header.top .tools{grid-area:tabs}
 .walker img{display:none;width:80px;height:130px;image-rendering:pixelated;image-rendering:crisp-edges}
 .walker[data-f="0"] img:nth-child(1),.walker[data-f="1"] img:nth-child(2),.walker[data-f="2"] img:nth-child(3){display:block}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* 名前の自動リンク */
+.mentions{margin-top:12px}
+.mrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.mchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:2px 10px 2px 2px;font-size:12.5px;cursor:pointer}
+.mchip:hover{border-color:var(--accent)}
+.mchip img{width:24px;height:24px;border-radius:50%;object-fit:cover;object-position:top}
+.mchip .mi{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);font-family:var(--f-display);font-weight:800;font-size:11px}
+.mchip.lore .mi{background:var(--warn-soft);color:var(--warn)}
+.peek{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;line-height:1.7}
+.peek .pk-h{display:flex;gap:10px;align-items:center}
+.peek .pk-h img{width:44px;height:44px;border-radius:50%;object-fit:cover;object-position:top}
+.peek .pk-h b{display:block;font-size:15px}.peek .pk-h span{color:var(--muted);font-size:12px}
+.peek .pk-m{color:var(--gilt);font-size:12px;margin-top:6px}
+.peek p{margin:6px 0 0;color:var(--ink)}
+
+/* 全体検索 */
+.dialog.search-d{max-width:720px;width:100%;align-self:flex-start;margin-top:6vh;max-height:82vh;display:flex;flex-direction:column}
+.sd-h{display:flex;gap:8px}
+.sd-h input{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg);font-size:15px}
+.gs-res{overflow:auto;margin-top:10px;display:flex;flex-direction:column;gap:2px}
+.gs-item{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;border:0;background:transparent;border-top:1px dashed var(--line);padding:8px 4px;width:100%}
+.gs-item:hover{background:var(--bg)}
+.gs-item b{font-size:13.5px}
+.gs-item .chip{font-size:10.5px}
+.gs-snip{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.gs-snip mark{background:var(--warn-soft);color:var(--warn);font-weight:700}
+
+/* バックアップ一覧 */
+.bklist{display:flex;flex-direction:column;margin-top:8px;max-height:260px;overflow:auto}
+.bk{display:flex;gap:10px;align-items:center;justify-content:space-between;border-top:1px dashed var(--line);padding:5px 0}
+
+/* 本文の下書き（カクヨムの執筆画面に寄せた紙面） */
+.drlinks{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 4px}
+.drl{display:inline-flex;gap:6px;align-items:center}
+.drl .mono{color:var(--muted);font-size:11px}
+.drl.has{border-color:color-mix(in srgb,var(--ok) 50%,var(--line))}
+.draft{margin-top:12px}
+.dr-bar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:var(--bg);padding:8px 0;border-bottom:1px solid var(--line)}
+.dr-where{display:flex;flex-direction:column;line-height:1.3;min-width:0}
+.dr-where span{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dr-tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-left:auto}
+.dr-tools .seg button{padding:4px 10px;font-size:12px}
+.dr-main{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;margin-top:14px;align-items:start}
+.draft.noside .dr-main{grid-template-columns:minmax(0,1fr)}
+.dr-paper{background:#fff;color:#222;border:1px solid var(--line);border-radius:6px;padding:28px clamp(16px,5vw,56px) 16px;max-width:820px;width:100%;margin-inline:auto;min-height:70vh;display:flex;flex-direction:column}
+.dr-title{border:0;border-bottom:1px solid #ddd;font-size:20px;font-weight:700;padding:6px 0 10px;background:transparent;color:#222;outline:none}
+.dr-title::placeholder,.dr-text::placeholder{color:#aaa}
+.dr-text{flex:none;overflow:hidden;border:0;resize:none;min-height:50vh;margin-top:16px;font-size:16px;line-height:1.9;letter-spacing:.02em;background:transparent;color:#222;outline:none;font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif}
+.dr-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid #eee;margin-top:10px;padding-top:10px;font-size:13px;color:#555}
+.dr-foot b{font-size:16px;color:#222;margin-right:2px}
+.dr-foot .hint{color:#888;margin-left:4px}
+.dr-nav{display:flex;gap:6px}
+.dr-help{margin-top:8px;color:#888}
+.dr-help code{background:#f3f3f3;border-radius:4px;padding:0 4px;color:#444}
+.dr-view{font-family:"Shippori Mincho B1","Hiragino Mincho ProN","Yu Mincho",serif;font-size:17px;line-height:2;color:#222;min-height:56vh}
+.dr-view h2{font-size:20px;margin:0 0 1.2em;font-weight:800}
+.dr-view p{margin:0}
+.dr-view.vert{writing-mode:vertical-rl;overflow-x:auto;height:68vh;min-height:0;line-height:1.9}
+.dr-view.vert h2{margin:0 0 0 1.4em}
+.dr-view ruby rt{font-size:.5em}
+.dr-view .bouten{font-style:normal;text-emphasis:filled sesame;-webkit-text-emphasis:filled sesame}
+.dr-side .card{margin-bottom:12px}
+.dr-side .sec{font-size:14px}
+.dr-pt{font-weight:700;margin:4px 0}
+.dr-beats{padding-left:1.4em;margin:6px 0;font-size:13px;line-height:1.7}
+.dr-sum{font-size:13px;line-height:1.7;white-space:pre-wrap}
+@media (max-width:860px){.dr-main{grid-template-columns:minmax(0,1fr)}.dr-paper{min-height:0}.dr-text{min-height:50vh}}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .dr-paper{background:#1d1e26;color:#e6e7ef;border-color:var(--line)}
+  :root:not([data-theme="light"]) .dr-title,:root:not([data-theme="light"]) .dr-text,:root:not([data-theme="light"]) .dr-view{color:#e6e7ef}
+  :root:not([data-theme="light"]) .dr-title{border-color:#333}:root:not([data-theme="light"]) .dr-foot{border-color:#333;color:#aaa}
+  :root:not([data-theme="light"]) .dr-foot b{color:#e6e7ef}:root:not([data-theme="light"]) .dr-help code{background:#2a2b35;color:#ccc}}
+
+#stats:empty{display:none}

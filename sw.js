@@ -1,5 +1,5 @@
 /* オフラインでも開けるように、アプリ本体を端末に保存しておく */
-const VERSION = "kozo-v17";
+const VERSION = "kozo-v18";
 const SHELL = ["./", "./index.html", "./app.js", "./store.js", "./drive.js", "./config.js", "./styles.css",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png",
   ...["gia", "zena", "til"].flatMap(n => [1, 2, 3].map(k => `./sprites/${n}_walk_${k}.png`))];

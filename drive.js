@@ -94,7 +94,18 @@ const Drive = (() => {
     const r = await api(UPLOAD + "?uploadType=multipart&fields=id", { method: "POST", headers: { "Content-Type": m.type }, body: m.body });
     return (await r.json()).id;
   }
+  // 名前を付けてJSONを作る（バックアップ用）
+  async function createNamedJson(folderId, name, obj) {
+    const m = multipart({ name, parents: [folderId], mimeType: "application/json" }, new Blob([JSON.stringify(obj)], { type: "application/json" }));
+    const r = await api(UPLOAD + "?uploadType=multipart&fields=id", { method: "POST", headers: { "Content-Type": m.type }, body: m.body });
+    return (await r.json()).id;
+  }
+  async function listByPrefix(folderId, prefix) {
+    const r = await api(`${API}?q=${q(`name contains '${prefix}' and '${folderId}' in parents and trashed=false`)}&fields=files(id,name,size,modifiedTime)&spaces=drive&pageSize=200`);
+    return ((await r.json()).files || []).filter(f => f.name.startsWith(prefix));
+  }
+  async function trash(fileId) { await api(`${API}/${fileId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trashed: true }) }); }
   async function downloadBlob(fileId) { const r = await api(`${API}/${fileId}?alt=media`); return r.blob(); }
 
-  return { configured, preload, signIn, ensureFolder, findData, readJson, createJson, updateJson, getVersion, uploadImage, downloadBlob, FOLDER };
+  return { configured, preload, signIn, ensureFolder, findData, readJson, createJson, updateJson, getVersion, uploadImage, downloadBlob, createNamedJson, listByPrefix, trash, FOLDER };
 })();
